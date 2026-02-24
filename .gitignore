@@ -1,0 +1,53 @@
+# === Build Output ===
+target/
+build/
+out/
+*.jar
+*.class
+*.war
+*.ear
+
+# === Maven ===
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# === Gradle ===
+.gradle/
+gradle/
+gradlew
+gradlew.bat
+!settings.gradle
+!build.gradle
+
+# === IDE - IntelliJ IDEA ===
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# === IDE - Eclipse ===
+.classpath
+.project
+.settings/
+
+# === IDE - VS Code ===
+.vscode/
+.gemini/
+
+# === OS Files ===
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# === Logs ===
+*.log
