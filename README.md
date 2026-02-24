@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Burp_Suite-Extension-orange?style=for-the-badge&logo=data:image/png;base64," alt="Burp Extension"/>
+  <img src="https://img.shields.io/badge/Burp_Suite-Extension-orange?style=for-the-badge" alt="Burp Extension"/>
   <img src="https://img.shields.io/badge/Java-17+-blue?style=for-the-badge&logo=openjdk" alt="Java 17+"/>
   <img src="https://img.shields.io/badge/API-Montoya-green?style=for-the-badge" alt="Montoya API"/>
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License"/>
@@ -30,6 +30,8 @@
 </p>
 
 ---
+
+<a id="installation"></a>
 
 ## 📥 Installation
 
@@ -71,6 +73,8 @@ Instead of manually crafting dozens of header and path variations, this extensio
 | Result analysis | Compare responses manually | **Smart color-coded diff** — status changes, word deltas, length anomalies highlighted automatically |
 
 ---
+
+<a id="features"></a>
 
 ## ✨ Features
 
@@ -154,6 +158,8 @@ Allows you to **select specific text** within a request and fuzz just that porti
 **Use case:** When you've identified a specific parameter or path segment that might be vulnerable, select it and test encoding-specific bypasses.
 
 ---
+
+<a id="web-cache-deception"></a>
 
 ### 🔹 Web Cache Deception (WCD) Testing
 
@@ -368,6 +374,8 @@ Access Context Fuzzer has been tested and **proven effective** against official 
 
 ---
 
+<a id="usage"></a>
+
 ## 🚀 Usage
 
 ### Quick Start
@@ -415,6 +423,8 @@ Step 5: Double-click the exploit row
 ```
 
 ---
+
+<a id="building-from-source"></a>
 
 ## 🏗 Building from Source
 
@@ -542,7 +552,6 @@ Place the following screenshots in the `img/` directory:
 | `opsec_check.png` | OPSEC panel showing verified IP address |
 | `installation.png` | Burp Extensions tab showing the loaded extension |
 | `context_menu.png` | Right-click context menu showing the three Access Context options |
-| `wcd_workflow.png` | Diagram or annotated screenshot of the complete WCD testing workflow |
 | `lab_success.png` | Screenshot showing solved PortSwigger labs (green "Solved" banners) |
 
 ---
@@ -552,6 +561,8 @@ Place the following screenshots in the `img/` directory:
 This tool is designed for **authorized security testing only**. Always ensure you have proper authorization before testing any target. The OPSEC features (IP verification, configurable delays) are provided to help testers operate safely and responsibly.
 
 ---
+
+<a id="contributing"></a>
 
 ## 🤝 Contributing
 
