@@ -17,6 +17,7 @@ import javax.swing.*;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
+import javax.swing.RowFilter;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -24,6 +25,7 @@ import java.io.File;
 import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -79,10 +81,13 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         JButton btnStop;
         JButton btnExport;
         JButton btnRerun;
+        JButton btnFilter;
         AtomicBoolean isRunning = new AtomicBoolean(false);
+        AtomicBoolean filterActive = new AtomicBoolean(false);
         Map<Integer, HttpRequestResponse> requestHistory = new ConcurrentHashMap<>();
         volatile HttpRequestResponse lastRequest;
         volatile int[] lastSelectionRange;
+        volatile int baselineStatus = -999;
         String engineType;
     }
 
@@ -129,13 +134,37 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         togglePanel.add(chkHeaderMethod);
         togglePanel.add(chkHeaderRewrite);
         settingsPanel.add(togglePanel);
+        JPanel presetPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        presetPanel.setBorder(BorderFactory.createTitledBorder("Scan Profiles"));
+        JButton btnHdrQuick = new JButton("\u26A1 Quick Scan");
+        btnHdrQuick.setToolTipText("Only IP/Host Spoofing");
+        btnHdrQuick.addActionListener(e -> {
+            chkHeaderIP.setSelected(true);
+            chkHeaderMethod.setSelected(false);
+            chkHeaderRewrite.setSelected(false);
+        });
+        JButton btnHdrFull = new JButton("\uD83D\uDD25 Full Scan");
+        btnHdrFull.setToolTipText("All payloads enabled");
+        btnHdrFull.addActionListener(e -> {
+            chkHeaderIP.setSelected(true);
+            chkHeaderMethod.setSelected(true);
+            chkHeaderRewrite.setSelected(true);
+        });
+        presetPanel.add(btnHdrQuick);
+        presetPanel.add(btnHdrFull);
+        settingsPanel.add(presetPanel);
         JPanel customPanel = new JPanel(new GridLayout(1, 2, 10, 0));
         customPanel.add(createTextAreaPanel("Custom IPs:", txtHeaderIPs = new JTextArea(4, 20)));
         customPanel.add(createTextAreaPanel("Custom Headers:", txtHeaderHeaders = new JTextArea(4, 20)));
         settingsPanel.add(customPanel);
+
+        // Prevent layout crushing by results table
+        settingsPanel.setMinimumSize(new Dimension(600, 320));
+        settingsPanel.setPreferredSize(new Dimension(600, 320));
+
         JPanel resultsPanel = buildResultsPanel(engine, "Header");
         JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, settingsPanel, resultsPanel);
-        splitPane.setDividerLocation(250);
+        splitPane.setDividerLocation(320);
         engine.mainPanel.add(splitPane, BorderLayout.CENTER);
         return engine;
     }
@@ -176,6 +205,45 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         togglePanel.add(chkPathNormDisc);
         togglePanel.add(chkPathCacheCombo);
         settingsPanel.add(togglePanel);
+        JPanel presetPathPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        presetPathPanel.setBorder(BorderFactory.createTitledBorder("Scan Profiles"));
+        JButton btnPathQuick = new JButton("\u26A1 Quick Scan");
+        btnPathQuick.setToolTipText("Only Path Normalization + Rewrite");
+        btnPathQuick.addActionListener(e -> {
+            chkPathRewrite.setSelected(true);
+            chkPathNorm.setSelected(true);
+            chkPathAdvanced.setSelected(false);
+            chkPathDelimiter.setSelected(false);
+            chkPathDelimExt.setSelected(false);
+            chkPathNormDisc.setSelected(false);
+            chkPathCacheCombo.setSelected(false);
+        });
+        JButton btnPathWcd = new JButton("\uD83C\uDFAF WCD Only");
+        btnPathWcd.setToolTipText("Only Web Cache Deception payloads");
+        btnPathWcd.addActionListener(e -> {
+            chkPathRewrite.setSelected(false);
+            chkPathNorm.setSelected(false);
+            chkPathAdvanced.setSelected(false);
+            chkPathDelimiter.setSelected(true);
+            chkPathDelimExt.setSelected(true);
+            chkPathNormDisc.setSelected(true);
+            chkPathCacheCombo.setSelected(true);
+        });
+        JButton btnPathFull = new JButton("\uD83D\uDD25 Full Scan");
+        btnPathFull.setToolTipText("All payloads enabled");
+        btnPathFull.addActionListener(e -> {
+            chkPathRewrite.setSelected(true);
+            chkPathNorm.setSelected(true);
+            chkPathAdvanced.setSelected(true);
+            chkPathDelimiter.setSelected(true);
+            chkPathDelimExt.setSelected(true);
+            chkPathNormDisc.setSelected(true);
+            chkPathCacheCombo.setSelected(true);
+        });
+        presetPathPanel.add(btnPathQuick);
+        presetPathPanel.add(btnPathWcd);
+        presetPathPanel.add(btnPathFull);
+        settingsPanel.add(presetPathPanel);
         JPanel wcdPanel = new JPanel(new GridLayout(2, 1, 5, 5));
         wcdPanel.setBorder(BorderFactory.createTitledBorder("Web Cache Deception Settings"));
         JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -192,9 +260,14 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         wcdPanel.add(row2);
         settingsPanel.add(wcdPanel);
         settingsPanel.add(createTextAreaPanel("Custom Paths:", txtPathPaths = new JTextArea(3, 30)));
+
+        // Prevent layout crushing by results table
+        settingsPanel.setMinimumSize(new Dimension(600, 420));
+        settingsPanel.setPreferredSize(new Dimension(600, 420));
+
         JPanel resultsPanel = buildResultsPanel(engine, "Path");
         JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, settingsPanel, resultsPanel);
-        splitPane.setDividerLocation(310);
+        splitPane.setDividerLocation(420);
         engine.mainPanel.add(splitPane, BorderLayout.CENTER);
         return engine;
     }
@@ -230,9 +303,14 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         togglePanel.add(chkSelUtf);
         settingsPanel.add(togglePanel);
         settingsPanel.add(createTextAreaPanel("Custom Payloads for Selection:", txtSelCustom = new JTextArea(4, 30)));
+
+        // Prevent layout crushing by results table
+        settingsPanel.setMinimumSize(new Dimension(600, 300));
+        settingsPanel.setPreferredSize(new Dimension(600, 300));
+
         JPanel resultsPanel = buildResultsPanel(engine, "Selection");
         JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, settingsPanel, resultsPanel);
-        splitPane.setDividerLocation(260);
+        splitPane.setDividerLocation(300);
         engine.mainPanel.add(splitPane, BorderLayout.CENTER);
         return engine;
     }
@@ -252,9 +330,13 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         engine.btnRerun.setEnabled(false);
         engine.btnRerun.setBackground(new Color(102, 178, 255));
         engine.btnRerun.setForeground(Color.WHITE);
+        engine.btnFilter = new JButton("\uD83D\uDD0D Show Only Interesting");
+        engine.btnFilter.setBackground(new Color(255, 193, 7));
+        engine.btnFilter.setForeground(Color.BLACK);
         controlPanel.add(engine.progressBar);
         controlPanel.add(engine.btnStop);
         controlPanel.add(engine.btnRerun);
+        controlPanel.add(engine.btnFilter);
         controlPanel.add(engine.btnExport);
         resultsPanel.add(controlPanel, BorderLayout.NORTH);
         engine.model = new DefaultTableModel(
@@ -281,6 +363,7 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         engine.btnStop.addActionListener(e -> stopEngine(engine, name));
         engine.btnExport.addActionListener(e -> exportToCsv(engine.model, name));
         engine.btnRerun.addActionListener(e -> rerunFuzzing(engine));
+        engine.btnFilter.addActionListener(e -> toggleInterestingFilter(engine));
         return resultsPanel;
     }
 
@@ -325,8 +408,46 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         return panel;
     }
 
+    private void toggleInterestingFilter(FuzzerEngine engine) {
+        TableRowSorter<?> sorter = (TableRowSorter<?>) engine.table.getRowSorter();
+        if (engine.filterActive.get()) {
+            sorter.setRowFilter(null);
+            engine.filterActive.set(false);
+            engine.btnFilter.setText("\uD83D\uDD0D Show Only Interesting");
+            engine.btnFilter.setBackground(new Color(255, 193, 7));
+        } else {
+            sorter.setRowFilter(new RowFilter<Object, Object>() {
+                @Override
+                public boolean include(Entry<?, ?> entry) {
+                    String notes = entry.getStringValue(8);
+                    int rowIdx = (int) entry.getValue(0);
+                    return rowIdx == 0 || (notes != null && !notes.isEmpty());
+                }
+            });
+            engine.filterActive.set(true);
+            engine.btnFilter.setText("\u2716 Show All Results");
+            engine.btnFilter.setBackground(new Color(76, 175, 80));
+        }
+    }
+
+    private Color getRowColor(int status, String notes) {
+        if (status == -1)
+            return new Color(200, 200, 200); // Grey — connection reset/timeout
+        if (notes != null && notes.contains("\uD83C\uDFAF POTENTIAL BYPASS"))
+            return new Color(255, 215, 100); // Gold — potential bypass found!
+        if (status >= 200 && status < 300)
+            return new Color(200, 255, 200); // Green — success
+        if (status == 301 || status == 302 || status == 307 || status == 308)
+            return new Color(200, 220, 255); // Light blue — redirect
+        if (status == 429)
+            return new Color(255, 255, 180); // Yellow — rate limited
+        if (status >= 500)
+            return new Color(255, 200, 200); // Red — server error
+        return null; // Return null so we can fallback to default Look and Feel color
+    }
+
     private void applySmartRenderer(JTable table, DefaultTableModel model) {
-        table.setDefaultRenderer(Integer.class, new DefaultTableCellRenderer() {
+        DefaultTableCellRenderer smartRenderer = new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
                     boolean hasFocus, int row, int column) {
@@ -335,54 +456,53 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                     try {
                         int modelRow = table.convertRowIndexToModel(row);
                         int status = (int) model.getValueAt(modelRow, 2);
-                        if (status >= 200 && status < 300)
-                            c.setBackground(new Color(200, 255, 200));
-                        else if (status >= 500)
-                            c.setBackground(new Color(255, 200, 200));
-                        else
-                            c.setBackground(Color.WHITE);
+                        String notes = (String) model.getValueAt(modelRow, 8);
+                        Color bg = getRowColor(status, notes);
+                        if (bg != null) {
+                            c.setBackground(bg);
+                            c.setForeground(Color.BLACK);
+                        } else {
+                            c.setBackground(table.getBackground());
+                            c.setForeground(table.getForeground());
+                        }
                     } catch (Exception ignored) {
+                        c.setBackground(table.getBackground());
+                        c.setForeground(table.getForeground());
                     }
                 }
                 return c;
             }
-        });
-        table.setDefaultRenderer(String.class, new DefaultTableCellRenderer() {
-            @Override
-            public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
-                    boolean hasFocus, int row, int column) {
-                Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-                if (!isSelected) {
-                    try {
-                        int modelRow = table.convertRowIndexToModel(row);
-                        int status = (int) model.getValueAt(modelRow, 2);
-                        if (status >= 200 && status < 300)
-                            c.setBackground(new Color(200, 255, 200));
-                        else if (status >= 500)
-                            c.setBackground(new Color(255, 200, 200));
-                        else
-                            c.setBackground(Color.WHITE);
-                    } catch (Exception ignored) {
-                    }
-                }
-                return c;
-            }
-        });
+        };
+        table.setDefaultRenderer(Integer.class, smartRenderer);
+        table.setDefaultRenderer(String.class, smartRenderer);
     }
 
     private void setupTableEvents(FuzzerEngine engine, String tabName) {
         JPopupMenu popupMenu = new JPopupMenu();
         JMenuItem sendToRepeaterItem = new JMenuItem("Send to Repeater");
+        JMenuItem sendAllSelectedItem = new JMenuItem("Send All Selected to Repeater");
+        JMenuItem sendInterestingItem = new JMenuItem("Send All Interesting to Repeater");
         popupMenu.add(sendToRepeaterItem);
+        popupMenu.add(sendAllSelectedItem);
+        popupMenu.addSeparator();
+        popupMenu.add(sendInterestingItem);
         engine.table.setComponentPopupMenu(popupMenu);
+        // Enable multi-select
+        engine.table.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         engine.table.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
-                int r = engine.table.rowAtPoint(e.getPoint());
-                if (r >= 0 && r < engine.table.getRowCount())
-                    engine.table.setRowSelectionInterval(r, r);
-                else
-                    engine.table.clearSelection();
+                if (e.isPopupTrigger() || SwingUtilities.isRightMouseButton(e)) {
+                    int r = engine.table.rowAtPoint(e.getPoint());
+                    if (r >= 0 && !engine.table.isRowSelected(r))
+                        engine.table.setRowSelectionInterval(r, r);
+                } else if (!e.isControlDown() && !e.isShiftDown()) {
+                    int r = engine.table.rowAtPoint(e.getPoint());
+                    if (r >= 0 && r < engine.table.getRowCount())
+                        engine.table.setRowSelectionInterval(r, r);
+                    else
+                        engine.table.clearSelection();
+                }
             }
 
             @Override
@@ -400,6 +520,7 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                 }
             }
         });
+        // Single row send
         sendToRepeaterItem.addActionListener(e -> {
             int selectedRow = engine.table.getSelectedRow();
             if (selectedRow != -1) {
@@ -410,6 +531,48 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                     api.repeater().sendToRepeater(rrData.request(),
                             tabName + ": " + engine.model.getValueAt(modelRow, 1));
             }
+        });
+        // Bulk send all selected rows
+        sendAllSelectedItem.addActionListener(e -> {
+            int[] selectedRows = engine.table.getSelectedRows();
+            int sent = 0;
+            for (int viewRow : selectedRows) {
+                int modelRow = engine.table.convertRowIndexToModel(viewRow);
+                int reqId = (int) engine.model.getValueAt(modelRow, 0);
+                HttpRequestResponse rrData = engine.requestHistory.get(reqId);
+                if (rrData != null) {
+                    api.repeater().sendToRepeater(rrData.request(),
+                            tabName + ": " + engine.model.getValueAt(modelRow, 1));
+                    sent++;
+                }
+            }
+            if (sent > 0)
+                JOptionPane.showMessageDialog(null, sent + " request(s) sent to Repeater.",
+                        "Sent to Repeater", JOptionPane.INFORMATION_MESSAGE);
+        });
+        // Send all rows with notes (interesting)
+        sendInterestingItem.addActionListener(e -> {
+            int sent = 0;
+            for (int i = 0; i < engine.model.getRowCount(); i++) {
+                String notes = (String) engine.model.getValueAt(i, 8);
+                int reqId = (int) engine.model.getValueAt(i, 0);
+                if (reqId == 0)
+                    continue; // skip baseline
+                if (notes != null && !notes.isEmpty()) {
+                    HttpRequestResponse rrData = engine.requestHistory.get(reqId);
+                    if (rrData != null) {
+                        api.repeater().sendToRepeater(rrData.request(),
+                                tabName + ": " + engine.model.getValueAt(i, 1));
+                        sent++;
+                    }
+                }
+            }
+            if (sent > 0)
+                JOptionPane.showMessageDialog(null, sent + " interesting request(s) sent to Repeater.",
+                        "Sent to Repeater", JOptionPane.INFORMATION_MESSAGE);
+            else
+                JOptionPane.showMessageDialog(null, "No interesting results found.",
+                        "Sent to Repeater", JOptionPane.INFORMATION_MESSAGE);
         });
     }
 
@@ -646,6 +809,20 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         }).start();
     }
 
+    private String bodyHash(HttpRequestResponse rr) {
+        try {
+            byte[] body = rr.response().body().getBytes();
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(body);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest)
+                sb.append(String.format("%02x", b & 0xff));
+            return sb.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
     private void startFuzzing(HttpRequestResponse baseRr, FuzzerEngine engine, List<Variant> variants, int delayMs) {
         engine.lastRequest = baseRr;
         engine.isRunning.set(true);
@@ -654,6 +831,11 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
             engine.btnRerun.setEnabled(false);
             engine.model.setRowCount(0);
             engine.progressBar.setValue(0);
+            engine.progressBar.setForeground(new Color(76, 175, 80));
+            // Reset filter when starting new scan
+            if (engine.filterActive.get()) {
+                toggleInterestingFilter(engine);
+            }
         });
         try {
             HttpRequest baseReq = baseRr.request();
@@ -662,6 +844,8 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
             int baseStatus = statusOf(baseline), baseLen = bodyLen(baseline), baseWords = wordCount(baseline),
                     baseLines = lineCount(baseline);
             String baseTitle = getTitle(baseline);
+            String baseHash = bodyHash(baseline);
+            engine.baselineStatus = baseStatus;
             SwingUtilities.invokeLater(() -> engine.model.addRow(new Object[] { 0, "BASELINE", baseStatus, baseWords,
                     baseLines, baseLen, baseTitle, 0, "Original" }));
             engine.requestHistory.put(0, baseline);
@@ -671,10 +855,15 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                 engine.progressBar.setString("0 / " + total);
             });
             int idx = 1;
+            int consecutiveResets = 0;
+            final int WAF_BLOCK_THRESHOLD = 5;
+            int currentDelay = delayMs;
+            long totalRttMs = 0;
+            int rttCount = 0;
             for (Variant v : variants) {
                 if (!engine.isRunning.get())
                     break;
-                Thread.sleep(delayMs);
+                Thread.sleep(currentDelay);
                 if (!engine.isRunning.get())
                     break;
                 final int rowNo = idx++;
@@ -685,12 +874,52 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                 engine.requestHistory.put(rowNo, rr);
                 int st = statusOf(rr), len = bodyLen(rr), words = wordCount(rr), lines = lineCount(rr);
                 String title = getTitle(rr), notes = "";
-                if (st != baseStatus)
+
+                // Time estimation
+                totalRttMs += rttMs + currentDelay;
+                rttCount++;
+                long avgMs = totalRttMs / rttCount;
+                int remaining = total - rowNo;
+                long etaSeconds = (remaining * avgMs) / 1000;
+                String etaStr = etaSeconds >= 60
+                        ? String.format("~%d:%02d remaining", etaSeconds / 60, etaSeconds % 60)
+                        : String.format("~%ds remaining", etaSeconds);
+
+                // WAF Blocking Detection: track consecutive status -1 (connection reset)
+                if (st == -1) {
+                    consecutiveResets++;
+                } else {
+                    consecutiveResets = 0;
+                }
+
+                // Adaptive Rate Limiting: auto-increase delay on 429/503
+                if (st == 429 || st == 503) {
+                    int oldDelay = currentDelay;
+                    currentDelay = Math.min(currentDelay < 100 ? 500 : currentDelay * 2, 30000);
+                    final int displayDelay = currentDelay;
+                    notes += "RATE_LIMITED(" + st + ") ";
+                    SwingUtilities.invokeLater(() -> engine.progressBar
+                            .setString("Rate limited! Delay → " + displayDelay + "ms"));
+                    Thread.sleep(currentDelay);
+                }
+
+                // Potential Bypass Detection
+                if (st != baseStatus && st >= 200 && st < 300
+                        && (baseStatus == 401 || baseStatus == 403 || baseStatus == 404 || baseStatus == 405))
+                    notes += "\uD83C\uDFAF POTENTIAL BYPASS ";
+                else if (st != baseStatus)
                     notes += "STATUS_CHANGE ";
+
                 if (words != baseWords)
                     notes += "WORD_DELTA ";
                 if (Math.abs(len - baseLen) > 50)
                     notes += "LEN_DELTA ";
+
+                // Response Body Hash comparison
+                String currentHash = bodyHash(rr);
+                if (!currentHash.isEmpty() && !baseHash.isEmpty() && !currentHash.equals(baseHash) && st == baseStatus)
+                    notes += "BODY_DIFF ";
+
                 String xCache = getHeaderValue(rr, "X-Cache");
                 if (!xCache.isEmpty())
                     notes += "X-Cache:" + xCache + " ";
@@ -701,12 +930,66 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                 if (!age.isEmpty())
                     notes += "Age:" + age + " ";
                 final String finalNotes = notes.trim();
+                final String finalEta = etaStr;
                 SwingUtilities.invokeLater(() -> {
                     engine.model.addRow(
                             new Object[] { rowNo, v.name, st, words, lines, len, title, (int) rttMs, finalNotes });
                     engine.progressBar.setValue(rowNo);
-                    engine.progressBar.setString(rowNo + " / " + total);
+                    engine.progressBar.setString(rowNo + " / " + total + " (" + finalEta + ")");
                 });
+
+                // If we hit the WAF block threshold, stop fuzzing and alert the user
+                if (consecutiveResets >= WAF_BLOCK_THRESHOLD) {
+                    engine.isRunning.set(false);
+                    final int resetCount = consecutiveResets;
+                    SwingUtilities.invokeLater(() -> {
+                        engine.progressBar.setString("WAF BLOCKED! Scan stopped.");
+                        engine.progressBar.setForeground(new Color(255, 60, 60));
+                        JOptionPane.showMessageDialog(null,
+                                "WAF Blocking Detected!\n\n"
+                                        + resetCount + " consecutive connection resets (status -1) detected.\n"
+                                        + "The target's WAF/firewall is likely blocking your requests.\n\n"
+                                        + "Suggestions:\n"
+                                        + "  \u2022 Increase the delay between requests\n"
+                                        + "  \u2022 Use a different IP / proxy\n"
+                                        + "  \u2022 Reduce the number of enabled payload categories",
+                                "WAF Blocking Detected",
+                                JOptionPane.WARNING_MESSAGE);
+                    });
+                    break;
+                }
+
+                // Session Health Check: every 50 requests, verify session is still valid
+                if (rowNo % 50 == 0 && engine.isRunning.get()) {
+                    try {
+                        HttpRequestResponse sessionCheck = api.http().sendRequest(baseReq);
+                        int sessionStatus = statusOf(sessionCheck);
+                        if (sessionStatus != baseStatus && sessionStatus != -1) {
+                            final int oldSt = baseStatus;
+                            final int newSt = sessionStatus;
+                            final int checkRow = rowNo;
+                            SwingUtilities.invokeLater(() -> {
+                                engine.model.addRow(new Object[] { checkRow, "SESSION CHECK",
+                                        newSt, 0, 0, 0, "", 0,
+                                        "\u26A0\uFE0F SESSION_DRIFT (" + oldSt + " \u2192 " + newSt + ")" });
+                                engine.progressBar.setString("Session drift detected!");
+                                engine.progressBar.setForeground(new Color(255, 165, 0));
+                            });
+                            int choice = JOptionPane.showConfirmDialog(null,
+                                    "Session Drift Detected!\n\n"
+                                            + "Baseline status was " + oldSt + " but now returns " + newSt + ".\n"
+                                            + "Your session may have expired or been invalidated.\n\n"
+                                            + "Continue scanning anyway?",
+                                    "Session Health Warning",
+                                    JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                            if (choice != JOptionPane.YES_OPTION) {
+                                engine.isRunning.set(false);
+                                break;
+                            }
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
             }
         } catch (Exception ignored) {
         } finally {
@@ -753,9 +1036,22 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         if (chkHeaderMethod.isSelected()) {
 
             String[] directMethods = { "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "HEAD",
-                    "PROPFIND", "DEBUG", "MOVE" };
+                    "PROPFIND", "DEBUG", "MOVE", "MKCOL", "COPY", "LOCK", "UNLOCK", "SEARCH",
+                    "PROPPATCH", "PURGE" };
             for (String m : directMethods)
                 out.add(new Variant("METHOD: " + m, baseReq.withMethod(m)));
+
+            // Case-variant methods (case-insensitive server detection)
+            String originalMethod = baseReq.method();
+            String[] caseVariants = {
+                    originalMethod.toLowerCase(),
+                    originalMethod.substring(0, 1).toUpperCase() + originalMethod.substring(1).toLowerCase(),
+                    originalMethod.substring(0, 1).toLowerCase() + originalMethod.substring(1).toUpperCase(),
+                    flipCase(originalMethod)
+            };
+            for (String cv : caseVariants)
+                if (!cv.equals(originalMethod))
+                    out.add(new Variant("METHOD-CASE: " + cv, baseReq.withMethod(cv)));
 
             String[] overrideHeaders = { "X-HTTP-Method-Override", "X-Original-Method", "X-Method-Override",
                     "X-HTTP-Method" };
@@ -764,6 +1060,22 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
             for (String h : overrideHeaders)
                 for (String m : methods)
                     out.add(new Variant("OVR: " + h + "=" + m, addOrReplaceHeader(baseReq, h, m)));
+
+            // Content-Type / Accept manipulation
+            String[] contentTypes = {
+                    "application/json", "application/xml", "application/x-www-form-urlencoded",
+                    "text/plain", "text/html", "multipart/form-data",
+                    "application/merge-patch+json", "application/soap+xml"
+            };
+            for (String ct : contentTypes)
+                out.add(new Variant("CT: Content-Type=" + ct, addOrReplaceHeader(baseReq, "Content-Type", ct)));
+
+            String[] acceptValues = {
+                    "application/json", "application/xml", "text/html", "text/plain", "*/*",
+                    "application/json, text/html;q=0.9", "application/vnd.api+json"
+            };
+            for (String av : acceptValues)
+                out.add(new Variant("ACCEPT: " + av, addOrReplaceHeader(baseReq, "Accept", av)));
         }
         if (chkHeaderRewrite.isSelected()) {
             String path = baseReq.path();
@@ -780,6 +1092,29 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                     addOrReplaceHeader(baseReq.withPath("/"), "X-Rewrite-URL", path)));
             out.add(new Variant("REWRITE: X-Accel-Redirect → " + pathOnly,
                     addOrReplaceHeader(baseReq, "X-Accel-Redirect", pathOnly)));
+
+            // HTTP/2 Pseudo-Header style injection (some proxies forward these as HTTP/1.1
+            // headers)
+            out.add(new Variant("H2: :authority=localhost",
+                    addOrReplaceHeader(baseReq, ":authority", "localhost")));
+            out.add(new Variant("H2: :authority=127.0.0.1",
+                    addOrReplaceHeader(baseReq, ":authority", "127.0.0.1")));
+            out.add(new Variant("H2: :path=" + pathOnly,
+                    addOrReplaceHeader(baseReq.withPath("/"), ":path", pathOnly)));
+            out.add(new Variant("H2: :path=" + path,
+                    addOrReplaceHeader(baseReq.withPath("/"), ":path", path)));
+
+            // Forwarding/scheme override headers
+            out.add(new Variant("SCHEME: X-Forwarded-Proto=https",
+                    addOrReplaceHeader(baseReq, "X-Forwarded-Proto", "https")));
+            out.add(new Variant("SCHEME: X-Forwarded-Scheme=https",
+                    addOrReplaceHeader(baseReq, "X-Forwarded-Scheme", "https")));
+            out.add(new Variant("SCHEME: X-Forwarded-Proto=http",
+                    addOrReplaceHeader(baseReq, "X-Forwarded-Proto", "http")));
+            out.add(new Variant("SCHEME: Front-End-Https=on",
+                    addOrReplaceHeader(baseReq, "Front-End-Https", "on")));
+            out.add(new Variant("SCHEME: X-Forwarded-Ssl=on",
+                    addOrReplaceHeader(baseReq, "X-Forwarded-Ssl", "on")));
         }
         for (String ip : txtHeaderIPs.getText().split("\n"))
             if (!ip.trim().isEmpty())
@@ -819,14 +1154,31 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
             out.add(new Variant("PATH: Trailing slash", baseReq.withPath(path.endsWith("/") ? path : path + "/")));
             out.add(new Variant("PATH: Double slash prefix", baseReq.withPath("//" + path)));
             out.add(new Variant("PATH: /..;/ injection", baseReq.withPath(injectDotDotSemicolon(path))));
+            out.add(new Variant("PATH: /..;/..;/ double injection", baseReq.withPath("/..;/..;" + path)));
             out.add(new Variant("PATH: ; suffix", baseReq.withPath(path.endsWith(";") ? path : path + ";")));
             out.add(new Variant("PATH: .json suffix", baseReq.withPath(path + ".json")));
+            out.add(new Variant("PATH: .html suffix", baseReq.withPath(path + ".html")));
             out.add(new Variant("PATH: Case Flip", baseReq.withPath(flipCase(path))));
+            out.add(new Variant("PATH: /./ dot segment", baseReq.withPath("/./" + stripLeadingSlash(path))));
+            out.add(new Variant("PATH: /. suffix", baseReq.withPath(path + "/.")));
+            out.add(new Variant("PATH: %20 suffix", baseReq.withPath(path + "%20")));
+            out.add(new Variant("PATH: %09 suffix", baseReq.withPath(path + "%09")));
         }
         if (chkPathAdvanced.isSelected()) {
             out.add(new Variant("ENC: URL Encode", baseReq.withPath(urlEncode(path))));
             out.add(new Variant("ENC: Double URL", baseReq.withPath(urlEncode(urlEncode(path)))));
             out.add(new Variant("ENC: IIS Unicode", baseReq.withPath(iisUnicodeEncode(path))));
+            // Overlong UTF-8 encodings (classic Apache/Tomcat/IIS bypass)
+            out.add(new Variant("ENC: Overlong UTF-8 ..%c0%af",
+                    baseReq.withPath(path.replace("/", "/..%c0%af"))));
+            out.add(new Variant("ENC: Overlong UTF-8 ..%c1%9c",
+                    baseReq.withPath(path.replace("/", "/..%c1%9c"))));
+            out.add(new Variant("ENC: Fullwidth / (%ef%bc%8f)",
+                    baseReq.withPath(path.replace("/", "%ef%bc%8f"))));
+            out.add(new Variant("ENC: Backslash ..%5c",
+                    baseReq.withPath(path.replace("/", "/..%5c"))));
+            out.add(new Variant("ENC: Windows backslash",
+                    baseReq.withPath(path.replace("/", "\\"))));
         }
         if (chkPathDelimiter.isSelected()) {
             String suffix = txtDelimSuffix.getText().trim();
