@@ -18,14 +18,6 @@ buildNumber.properties
 .mvn/timing.properties
 .mvn/wrapper/maven-wrapper.jar
 
-# === Gradle ===
-.gradle/
-gradle/
-gradlew
-gradlew.bat
-!settings.gradle
-!build.gradle
-
 # === IDE - IntelliJ IDEA ===
 .idea/
 *.iml
@@ -40,6 +32,9 @@ gradlew.bat
 # === IDE - VS Code ===
 .vscode/
 .gemini/
+
+# === AI Assistants ===
+.claude/
 
 # === OS Files ===
 .DS_Store

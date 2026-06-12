@@ -38,7 +38,7 @@
 ### Option 1: Download Pre-built JAR (Recommended)
 
 1. Go to **[Releases](https://github.com/Tagoletta/AccessContextFuzzer/releases/latest)**
-2. Download `access-context-fuzzer-1.0-jar-with-dependencies.jar`
+2. Download `access-context-fuzzer-2.0.0-jar-with-dependencies.jar`
 3. Open **Burp Suite** → **Extensions** → **Add**
 4. Select the downloaded JAR file
 5. The **"Access Context"** tab will appear in Burp Suite
@@ -180,6 +180,8 @@ Allows you to **select specific text** within a request and fuzz just that porti
 ### 🔹 Web Cache Deception (WCD) Testing
 
 A dedicated 4-phase pipeline for discovering and exploiting Web Cache Deception vulnerabilities. Each phase maps directly to a checkbox in the **"Built-in Payloads"** panel:
+
+> 📚 **New to Web Cache Deception?** Read the in-depth guide **[Web Cache Deception & Poisoning](https://tagmachan.com/web-cache-deception-and-poisoning.tagox)** to understand the theory behind every phase below before you start fuzzing.
 
 <p align="center">
   <img src="img/wcd_settings.png" alt="WCD Settings Panel" width="900"/>
@@ -382,7 +384,7 @@ Access Context Fuzzer has been tested and **proven effective** against official 
 
 ### From JAR (Recommended)
 
-1. Download the latest `access-context-fuzzer-1.0-jar-with-dependencies.jar` from [Releases](../../releases)
+1. Download the latest `access-context-fuzzer-2.0.0-jar-with-dependencies.jar` from [Releases](../../releases)
 2. In Burp Suite, go to **Extensions** → **Installed** → **Add**
 3. Set **Extension type** to **Java**
 4. Select the downloaded JAR file
@@ -456,9 +458,9 @@ Step 5: Double-click the exploit row
 ### Prerequisites
 
 - **JDK 17+** (OpenJDK or Oracle JDK)
-- **Maven 3.6+** or **Gradle 7+**
+- **Maven 3.6+**
 
-### Maven (Recommended)
+### Maven
 
 ```bash
 # Clone the repository
@@ -471,15 +473,7 @@ mvn compile
 # Build JAR with dependencies
 mvn package
 
-# Output: target/access-context-fuzzer-1.0-jar-with-dependencies.jar
-```
-
-### Gradle
-
-```bash
-gradle build
-
-# Output: build/libs/access-context-fuzzer-1.0.jar
+# Output: target/access-context-fuzzer-2.0.0-jar-with-dependencies.jar
 ```
 
 ### Project Structure
@@ -512,8 +506,6 @@ AccessContextFuzzer/
 │   └── workflows/
 │       └── release.yml                         # Auto-build & release on tag push
 ├── pom.xml                                     # Maven build config
-├── build.gradle                                # Gradle build config
-├── settings.gradle
 ├── .gitignore
 └── README.md
 ```
@@ -624,6 +616,10 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 - **PortSwigger** — for Burp Suite and the [Montoya API](https://portswigger.net/burp/documentation/desktop/extensions/creating)
 - **PortSwigger Web Security Academy** — for the [Web Cache Deception labs](https://portswigger.net/web-security/web-cache-deception) that inspired the WCD module
 - The security research community for documenting access control bypass techniques
+
+### 📖 Further Reading
+
+- [Web Cache Deception & Poisoning](https://tagmachan.com/web-cache-deception-and-poisoning.tagox) — a deep dive into the attack classes this extension automates
 
 ---
 
