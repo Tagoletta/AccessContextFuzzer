@@ -38,7 +38,7 @@
 ### Option 1: Download Pre-built JAR (Recommended)
 
 1. Go to **[Releases](https://github.com/Tagoletta/AccessContextFuzzer/releases/latest)**
-2. Download `access-context-fuzzer-2.3.0-jar-with-dependencies.jar`
+2. Download the latest `access-context-fuzzer-*-jar-with-dependencies.jar`
 3. Open **Burp Suite** → **Extensions** → **Add**
 4. Select the downloaded JAR file
 5. The **"Access Context"** tab will appear in Burp Suite
@@ -432,7 +432,7 @@ Access Context Fuzzer has been tested and **proven effective** against official 
 
 ### From JAR (Recommended)
 
-1. Download the latest `access-context-fuzzer-2.3.0-jar-with-dependencies.jar` from [Releases](../../releases)
+1. Download the latest `access-context-fuzzer-*-jar-with-dependencies.jar` from [Releases](../../releases)
 2. In Burp Suite, go to **Extensions** → **Installed** → **Add**
 3. Set **Extension type** to **Java**
 4. Select the downloaded JAR file
