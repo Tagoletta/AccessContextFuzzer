@@ -38,7 +38,7 @@
 ### Option 1: Download Pre-built JAR (Recommended)
 
 1. Go to **[Releases](https://github.com/Tagoletta/AccessContextFuzzer/releases/latest)**
-2. Download `access-context-fuzzer-2.0.0-jar-with-dependencies.jar`
+2. Download `access-context-fuzzer-2.3.0-jar-with-dependencies.jar`
 3. Open **Burp Suite** → **Extensions** → **Add**
 4. Select the downloaded JAR file
 5. The **"Access Context"** tab will appear in Burp Suite
@@ -62,6 +62,44 @@ Instead of manually crafting dozens of header and path variations, this extensio
 <p align="center">
   <img src="img/overview.png" alt="Extension Overview" width="900"/>
 </p>
+
+---
+
+## 🌟 What's New in v2.3.0
+
+- 📊 **Cache Status Column:** Results table now has a dedicated **Cache** column showing `HIT ✅`, `MISS`, `PRIVATE 🚫`, `NO-STORE 🚫`, `HIT/Vary:Cookie`, or the raw `X-Cache` value. WCD triage without reading the Notes column.
+- 🌐 **CDN Profile Selector:** Pick your target's CDN (Cloudflare, Akamai, Fastly, CloudFront, Nginx, Varnish) in the Path engine. Delimiter payloads are filtered to that CDN's known delimiter set — less noise, more signal.
+- 🏋️ **Fat GET:** New checkbox in Path engine. Sends the request as a GET with a body. CDNs key the cache on path and ignore the body; some origins behave differently. Surfaces WCD vectors that path-only testing misses.
+- 🗂️ **Extended Static Extensions:** Delimiter + Extension phase now covers 19 file types (was 6): `.js .css .png .jpg .gif .ico .woff .woff2 .svg .ttf .eot .mp4 .webp .avif .pdf .xml .json .txt .html`.
+- 🔬 **Normalization Discrepancy Extras:** Four additional Norm Discrepancy payloads: `%252F` (double-encoded slash), BOM + extension, `%00.css` (null byte), `%c0%af` (overlong UTF-8).
+- 🔑 **Sensitive Data Detection:** Every response body is automatically scanned for JWT tokens, CSRF tokens, email fields, Bearer tokens, and API keys. Matches are flagged as `SENSITIVE_DATA:JWT` (etc.) in Notes and highlighted pink. Confirms WCD exploitation when an unauthenticated cache replay returns sensitive content.
+- 📋 **WCD Scan Summary:** After a Path engine scan, a popup summarises cache findings — HIT count, private/no-store count, Vary:Cookie count, and which specific variants look exploitable.
+- 🔓 **Verify WCD (No-Auth):** New right-click context menu item. Replays the URL without cookies or auth headers in a fresh connection. If the cached response still returns authenticated content, it's a confirmed WCD finding — shown in a before/after comparison dialog.
+- 🏗️ **Internal Refactor (1 file → 17 files):** The monolithic `AccessContextFuzzer.java` (was ~2000 lines) is now a proper multi-package structure: `burp.core`, `burp.util`, `burp.payload`, `burp.ui`. No behaviour changes — the entry point is now 123 lines. Makes contributing significantly more approachable.
+
+---
+
+## 🌟 What's New in v2.2.0
+
+- 💾 **Settings Persistence (A):** All checkboxes, spinners, delays, and custom rules now auto-save using Burp's native Preferences API and are restored on next load.
+- ⚡ **Parallel Fuzzing Mode (B):** Toggle `Parallel Mode` in the new **⚙ Settings & History** tab to send multiple requests simultaneously. Configurable thread count (2–20). Ordered collection preserves row numbering. Disables delay and session drift check.
+- 📊 **Scan Summary (D):** Progress bar updates to a rich summary at end of scan — `Done! ✅ 147 sent | 12 interesting | 3 🎯 bypasses | Re-run available`.
+- 🔍 **Response Diff Viewer (E):** Right-click any row → **Compare with Baseline** for a side-by-side HTML diff showing which lines changed between the baseline and the variant response.
+- 📝 **Custom Detection Rules (G):** Define regex patterns in the Settings tab using `regex=LABEL` format. Matches in any response body are highlighted as `CUSTOM:LABEL` in the Notes column.
+- 🔀 **Expanded Bypass Detection (H):** Now detects redirect-based bypasses (`🔀 REDIRECT BYPASS?` for 403→30x) and same-status body changes on 2xx (`⚠️ BODY_BYPASS?`).
+- 🛡️ **Configurable WAF Threshold (I):** The WAF block threshold (consecutive connection resets before auto-stop) is now a spinner in Settings — default 5, range 1–50.
+- 📋 **Scan History Tab (J):** A new **⚙ Settings & History** tab logs every completed scan with engine type, target URL, timestamp, payload count, interesting count, bypass count, and baseline status.
+- 👁️ **Payload Preview (K):** Click **👁 Preview Payloads** on any engine tab to see a full categorized list of all variants that would be sent — without actually running the scan.
+
+---
+
+## 🌟 What's New in v2.1.0
+
+- 🔧 **Thread Safety:** Fixed thread leak on extension unload via `taskExecutor.shutdownNow()`.
+- 🖥️ **Swing EDT Fix:** `flashTab()` converted from raw `Thread.sleep()` to a proper `javax.swing.Timer`.
+- ♻️ **DRY Refactor:** Eliminated 3× duplicate OPSEC panel code with `buildOpsecPanel()` helper.
+- 📣 **Error Visibility:** All silently swallowed exceptions now log to `api.logging().logToError()`.
+- 📂 **CSV Export Fix:** Export failure now shows an error dialog instead of failing silently.
 
 ---
 
@@ -250,18 +288,24 @@ Every fuzzing result is displayed in an intelligent, color-coded table:
 | **#** | Row index |
 | **Variant** | Name of the test (e.g., `DELIM: '?'`, `WCD: '%23' + traversal`) |
 | **Status** | HTTP status code |
+| **Cache** | Cache status: `HIT ✅`, `MISS`, `PRIVATE 🚫`, `NO-STORE 🚫`, `HIT/Vary:Cookie`, or raw `X-Cache` value |
 | **Words** | Word count of the response body |
 | **Lines** | Line count of the response body |
 | **Length** | Response body length in bytes |
 | **Title** | Extracted HTML `<title>` tag |
 | **RTT(ms)** | Round-trip time in milliseconds |
-| **Notes** | Auto-detected anomalies and cache headers |
+| **Notes** | Auto-detected anomalies and sensitive data matches |
 
 **Automatic anomaly detection in Notes:**
 
 | Tag | Meaning |
 |-----|---------|
-| `🎯 POTENTIAL BYPASS` | Baseline was a 40x error, but payload returned 2xx! |
+| `SENSITIVE_DATA:JWT` | Response body contains a JWT token (also: `CSRF`, `EMAIL`, `BEARER`, `SECRET`) |
+| `🎯 POTENTIAL BYPASS` | Baseline was a 40x error, but payload returned 2xx — strong bypass signal |
+| `🔀 REDIRECT BYPASS?` | 401/403 baseline changed to a 30x redirect — possible auth bypass via redirect |
+| `⚠️ BODY_BYPASS?` | Same 2xx status but body content changed — possible auth bypass with same code |
+| `🔍 PATH_CONFUSION` | 404 baseline returned a non-404 response — path traversal or confusion |
+| `CUSTOM:LABEL` | Response body matched a user-defined regex rule from the Settings tab |
 | `STATUS_CHANGE` | Response status differs from baseline |
 | `WORD_DELTA` | Word count differs from baseline |
 | `LEN_DELTA` | Body length differs by >50 bytes |
@@ -275,10 +319,14 @@ Every fuzzing result is displayed in an intelligent, color-coded table:
 
 **Color coding:**
 
-- 🟡 **Gold rows** — Potential bypass detected (investigate immediately!)
-- 🟢 **Green rows** — 2xx Success (or matches baseline)
-- 🔵 **Light Blue rows** — 3xx Redirects
-- � **Light Yellow rows** — 429 Rate Limited
+- 🩷 **Pink rows** — Sensitive data in response body (`SENSITIVE_DATA:*`)
+- 🟡 **Gold rows** — Potential bypass detected (`🎯 POTENTIAL BYPASS`)
+- 🔵 **Sky-blue rows** — Redirect bypass hint (`🔀 REDIRECT BYPASS?`)
+- 🟠 **Orange rows** — Body-based bypass hint (`⚠️ BODY_BYPASS?`)
+- 🟣 **Lavender rows** — Custom rule match (`CUSTOM:LABEL`)
+- 🟢 **Green rows** — 2xx Success response
+- 💙 **Light Blue rows** — 3xx Redirects
+- 🟡 **Light Yellow rows** — 429 Rate Limited
 - 🔴 **Red rows** — 5xx Server errors
 - ⚪ **Grey rows** — -1 Connection Resets (WAF dropping packets)
 
@@ -384,7 +432,7 @@ Access Context Fuzzer has been tested and **proven effective** against official 
 
 ### From JAR (Recommended)
 
-1. Download the latest `access-context-fuzzer-2.0.0-jar-with-dependencies.jar` from [Releases](../../releases)
+1. Download the latest `access-context-fuzzer-2.3.0-jar-with-dependencies.jar` from [Releases](../../releases)
 2. In Burp Suite, go to **Extensions** → **Installed** → **Add**
 3. Set **Extension type** to **Java**
 4. Select the downloaded JAR file
@@ -473,7 +521,7 @@ mvn compile
 # Build JAR with dependencies
 mvn package
 
-# Output: target/access-context-fuzzer-2.0.0-jar-with-dependencies.jar
+# Output: target/access-context-fuzzer-2.3.0-jar-with-dependencies.jar
 ```
 
 ### Project Structure
@@ -482,30 +530,34 @@ mvn package
 AccessContextFuzzer/
 ├── src/
 │   └── main/
-│       ├── java/
-│       │   └── burp/
-│       │       └── AccessContextFuzzer.java    # Main extension (single file)
-│       └── resources/                          # (reserved for future assets)
-├── img/                                        # README screenshots
-│   ├── banner.png
-│   ├── overview.png
-│   ├── header_bypass_tab.png
-│   ├── path_bypass_tab.png
-│   ├── selection_fuzz_tab.png
-│   ├── wcd_settings.png
-│   ├── wcd_results.png
-│   ├── results_table.png
-│   ├── request_response_viewer.png
-│   ├── rerun_button.png
-│   ├── load_file.png
-│   ├── opsec_check.png
-│   ├── installation.png
-│   ├── context_menu.png
-│   └── wcd_workflow.png
+│       └── java/
+│           └── burp/
+│               ├── AccessContextFuzzer.java        # Entry point (123 lines)
+│               ├── core/
+│               │   ├── ExtensionContext.java        # Shared state / DI container
+│               │   ├── ScanEngine.java              # Scan orchestration, WCD logic
+│               │   ├── FuzzerEngine.java            # Per-engine UI state
+│               │   ├── FuzzResult.java              # Data class: response + RTT
+│               │   └── Variant.java                 # Data class: name + request
+│               ├── payload/
+│               │   ├── HeaderPayloadBuilder.java    # Header bypass variants
+│               │   ├── PathPayloadBuilder.java      # Path + WCD variants
+│               │   └── SelectionPayloadBuilder.java # Selection encoding variants
+│               ├── ui/
+│               │   ├── HeaderEngineTab.java
+│               │   ├── PathEngineTab.java
+│               │   ├── SelectionEngineTab.java
+│               │   ├── ResultsPanel.java
+│               │   ├── SettingsTab.java
+│               │   └── DiffDialog.java
+│               └── util/
+│                   ├── HttpUtils.java               # Static helpers: status, cache, diff
+│                   └── EncoderUtils.java            # URL/Unicode encoding helpers
+├── img/                                            # README screenshots
 ├── .github/
 │   └── workflows/
-│       └── release.yml                         # Auto-build & release on tag push
-├── pom.xml                                     # Maven build config
+│       └── release.yml                             # Auto-build & release on tag push
+├── pom.xml                                         # Maven build config
 ├── .gitignore
 └── README.md
 ```
@@ -599,9 +651,10 @@ Contributions are welcome! Here's how to get started:
 
 - [ ] Additional encoding schemes (e.g., Base64, Punycode)
 - [ ] GraphQL-specific bypass techniques
-- [ ] Request diff viewer (visual side-by-side comparison)
 - [ ] Collaborative notes / tagging for results
 - [ ] Auto-detect interesting responses using ML heuristics
+- [ ] WCD two-phase verification (automated attacker re-request to confirm cached content)
+- [ ] Persistent scan history across Burp restarts (serialize to file)
 
 ---
 
