@@ -9,6 +9,7 @@ import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 
 import burp.core.ExtensionContext;
 import burp.core.ScanEngine;
+import burp.core.Variant;
 import burp.payload.HeaderPayloadBuilder;
 import burp.payload.PathPayloadBuilder;
 import burp.payload.SelectionPayloadBuilder;
@@ -56,7 +57,6 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         api.userInterface().registerSuiteTab("Access Context", mainTabs);
         api.userInterface().registerContextMenuItemsProvider(this);
 
-        // Enable tooltip display inside popup/context menus
         ToolTipManager.sharedInstance().setEnabled(true);
         ToolTipManager.sharedInstance().setInitialDelay(300);
         ToolTipManager.sharedInstance().setDismissDelay(8000);
@@ -90,9 +90,11 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
             ctx.mainTabs.setSelectedIndex(0);
             scanEngine.focusSuiteTab();
             scanEngine.flashTab(0, "🔐 Header Bypass");
-            ctx.taskExecutor.submit(() -> scanEngine.startFuzzing(finalReq, ctx.headerEngine,
-                    new HeaderPayloadBuilder(ctx).build(finalReq.request()),
-                    (int) ctx.spinHeaderDelay.getValue()));
+            // Build variants and read spinner on EDT before submitting to background thread
+            List<Variant> variants = new HeaderPayloadBuilder(ctx).build(finalReq.request());
+            int delay = (int) ctx.spinHeaderDelay.getValue();
+            ScanEngine.ScanConfig cfg = new ScanEngine.ScanConfig(ctx);
+            ctx.taskExecutor.submit(() -> scanEngine.startFuzzing(finalReq, ctx.headerEngine, variants, delay, cfg));
         });
         menuItems.add(runHeader);
 
@@ -105,9 +107,10 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
             ctx.mainTabs.setSelectedIndex(1);
             scanEngine.focusSuiteTab();
             scanEngine.flashTab(1, "🔀 Path / GET Bypass");
-            ctx.taskExecutor.submit(() -> scanEngine.startFuzzing(finalReq, ctx.pathEngine,
-                    new PathPayloadBuilder(ctx).build(finalReq.request()),
-                    (int) ctx.spinPathDelay.getValue()));
+            List<Variant> variants = new PathPayloadBuilder(ctx).build(finalReq.request());
+            int delay = (int) ctx.spinPathDelay.getValue();
+            ScanEngine.ScanConfig cfg = new ScanEngine.ScanConfig(ctx);
+            ctx.taskExecutor.submit(() -> scanEngine.startFuzzing(finalReq, ctx.pathEngine, variants, delay, cfg));
         });
         menuItems.add(runPath);
 
@@ -125,11 +128,12 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                     ctx.mainTabs.setSelectedIndex(2);
                     scanEngine.focusSuiteTab();
                     scanEngine.flashTab(2, "🎯 Selection Fuzz");
+                    List<Variant> variants = new SelectionPayloadBuilder(ctx).build(finalReq.request(), start, end);
+                    int delay = (int) ctx.spinSelDelay.getValue();
+                    ScanEngine.ScanConfig cfg = new ScanEngine.ScanConfig(ctx);
                     ctx.taskExecutor.submit(() -> {
                         ctx.selectionEngine.lastSelectionRange = new int[]{start, end};
-                        scanEngine.startFuzzing(finalReq, ctx.selectionEngine,
-                                new SelectionPayloadBuilder(ctx).build(finalReq.request(), start, end),
-                                (int) ctx.spinSelDelay.getValue());
+                        scanEngine.startFuzzing(finalReq, ctx.selectionEngine, variants, delay, cfg);
                     });
                 });
                 menuItems.add(runSel);

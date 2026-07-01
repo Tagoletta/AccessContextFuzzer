@@ -7,12 +7,20 @@ public final class ThemeColors {
 
     private ThemeColors() {}
 
-    // ── Theme detection ──────────────────────────────────────────────────────
+    // ── Theme detection (cached; refreshed on L&F change) ────────────────────
 
-    public static boolean isDark() {
+    private static volatile boolean cachedDark = computeIsDark();
+
+    static {
+        UIManager.addPropertyChangeListener("lookAndFeel", evt -> cachedDark = computeIsDark());
+    }
+
+    private static boolean computeIsDark() {
         Color bg = UIManager.getColor("Panel.background");
         return bg != null && (0.299 * bg.getRed() + 0.587 * bg.getGreen() + 0.114 * bg.getBlue()) < 128;
     }
+
+    public static boolean isDark() { return cachedDark; }
 
     // ── Table row highlight colors ────────────────────────────────────────────
 

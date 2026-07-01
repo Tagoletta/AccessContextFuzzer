@@ -63,8 +63,8 @@ public class DiffDialog {
         String added   = ThemeColors.diffAdded();
         String removed = ThemeColors.diffRemoved();
 
-        String[] baseLines = baseBody.split("\n", -1);
-        String[] varLines  = varBody.split("\n", -1);
+        String[] baseLines = baseBody.split("\r?\n", -1);
+        String[] varLines  = varBody.split("\r?\n", -1);
         int maxLen = Math.min(Math.max(baseLines.length, varLines.length), 1000);
 
         StringBuilder html = new StringBuilder(

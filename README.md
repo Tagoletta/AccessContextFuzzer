@@ -65,6 +65,24 @@ Instead of manually crafting dozens of header and path variations, this extensio
 
 ---
 
+## 🌟 What's New in v2.3.2
+
+**Bug Fixes**
+- 🐛 **Swing EDT violations in scan startup:** `startFuzzing()` ran on a background thread but read `JTextArea`, `JSpinner`, and `JCheckBox` values directly — a race condition with the EDT. All UI values are now snapshotted via `ScanConfig` on the EDT before the task is submitted.
+- 🐛 **Swing EDT violations in context-menu handlers:** Payload builders (`HeaderPayloadBuilder`, `PathPayloadBuilder`, `SelectionPayloadBuilder`) were being constructed inside the executor lambda, reading multiple `JCheckBox` components off the EDT. Builders are now called on the EDT before task submission.
+- 🐛 **`flashTab` Timer created off EDT:** The `javax.swing.Timer` inside `flashTab()` was being constructed and started from the background fuzzing thread. Wrapped in `SwingUtilities.invokeLater()`.
+- 🐛 **DiffDialog false diff on CRLF responses:** `split("\n")` left trailing `\r` on each element when responses used Windows line endings, causing identical lines to appear as "changed". Changed to `split("\r?\n")`.
+- 🐛 **Invalid custom rule regex silently discarded:** A bad pattern in the Custom Detection Rules panel was swallowed by `catch (Exception ignored)` with no feedback. Now logged to Burp's output panel.
+- 🐛 **`btnPreview` useless executor roundtrip:** The Preview Payloads button submitted to the background thread pool only to immediately dispatch back to the EDT via `invokeLater`. Removed the intermediate hop.
+- 🐛 **Duplicate `buildOpsecPanel` / `createTextAreaPanel` in every tab:** `HeaderEngineTab`, `PathEngineTab`, and `SelectionEngineTab` each declared private copies of methods already defined as `public static` in `ResultsPanel`. All three now delegate to the canonical implementations.
+
+**Performance**
+- ⚡ **Single `bodyToString()` call per response:** `wordCount`, `lineCount`, `getTitle`, `detectSensitiveData`, and `bodyHash` each called `rr.response().bodyToString()` independently — up to 5 redundant body conversions per variant. A `bodyStr()` helper now fetches the body once per response; all analysis methods accept the pre-fetched string via overloaded signatures.
+- ⚡ **ThreadLocal `MessageDigest` for MD5 hashing:** `MessageDigest.getInstance("MD5")` triggered a security-provider lookup on every call. Replaced with a `ThreadLocal<MessageDigest>` that is reused (`md.reset()`) across calls on the same thread — zero lookups after warm-up.
+- ⚡ **`ThemeColors.isDark()` result cached:** Every table cell repaint called `UIManager.getColor("Panel.background")` through `isDark()`. The result is now cached in a `volatile boolean` and refreshed only when the Look & Feel changes via a `UIManager` property listener.
+
+---
+
 ## 🌟 What's New in v2.3.1
 
 **Bug Fixes**

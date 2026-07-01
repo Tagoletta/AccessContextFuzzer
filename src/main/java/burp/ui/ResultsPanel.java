@@ -90,8 +90,7 @@ public class ResultsPanel {
         engine.btnExport.addActionListener(e -> exportToCsv(engine.model, name));
         engine.btnRerun.addActionListener(e -> scanEngine.rerunFuzzing(engine));
         engine.btnFilter.addActionListener(e -> toggleInterestingFilter(engine));
-        engine.btnPreview.addActionListener(e ->
-                ctx.taskExecutor.submit(() -> SwingUtilities.invokeLater(() -> scanEngine.showPayloadPreview(engine))));
+        engine.btnPreview.addActionListener(e -> scanEngine.showPayloadPreview(engine));
 
         return resultsPanel;
     }

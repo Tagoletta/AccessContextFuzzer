@@ -29,7 +29,29 @@ public class ScanEngine {
         this.ctx = ctx;
     }
 
-    private static List<Object[]> buildCompiledRules(String rulesText) {
+    // -------------------------------------------------------------------------
+    // Scan configuration snapshot (must be created on the EDT)
+    // -------------------------------------------------------------------------
+
+    public static final class ScanConfig {
+        public final String detectRules;
+        public final int wafThreshold;
+        public final boolean parallel;
+        public final int parallelThreads;
+
+        public ScanConfig(ExtensionContext ctx) {
+            this.detectRules     = ctx.txtDetectRules.getText();
+            this.wafThreshold    = (int) ctx.spinWafThreshold.getValue();
+            this.parallel        = ctx.chkParallelMode.isSelected();
+            this.parallelThreads = (int) ctx.spinParallelThreads.getValue();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Rule compilation
+    // -------------------------------------------------------------------------
+
+    private List<Object[]> buildCompiledRules(String rulesText) {
         List<Object[]> result = new ArrayList<>();
         if (rulesText == null || rulesText.isBlank()) return result;
         for (String line : rulesText.split("\n")) {
@@ -42,7 +64,9 @@ public class ScanEngine {
             if (label.isEmpty()) continue;
             try {
                 result.add(new Object[]{Pattern.compile(regex, Pattern.CASE_INSENSITIVE | Pattern.DOTALL), label});
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                ctx.api.logging().logToError("[ACF] Invalid custom rule regex '" + regex + "': " + e.getMessage());
+            }
         }
         return result;
     }
@@ -64,7 +88,7 @@ public class ScanEngine {
     }
 
     public void startFuzzing(HttpRequestResponse baseRr, FuzzerEngine engine,
-                              List<Variant> variants, int delayMs) {
+                              List<Variant> variants, int delayMs, ScanConfig config) {
         engine.lastRequest = baseRr;
         engine.isRunning.set(true);
         SwingUtilities.invokeLater(() -> {
@@ -74,7 +98,6 @@ public class ScanEngine {
             engine.progressBar.setValue(0);
             engine.progressBar.setForeground(new Color(76, 175, 80));
             if (engine.filterActive.get()) {
-                // reset filter via table row sorter
                 try {
                     javax.swing.table.TableRowSorter<?> sorter =
                             (javax.swing.table.TableRowSorter<?>) engine.table.getRowSorter();
@@ -86,7 +109,8 @@ public class ScanEngine {
             }
         });
 
-        compiledCustomRules = buildCompiledRules(ctx.txtDetectRules.getText());
+        // All UI values come from the pre-built ScanConfig (read on EDT by caller)
+        compiledCustomRules = buildCompiledRules(config.detectRules);
 
         int processedCount = 0, interestingCount = 0, bypassCount = 0, finalBaseStatus = -1;
         int wcdCachedCount = 0, wcdPrivateCount = 0, wcdNoStoreCount = 0;
@@ -98,12 +122,13 @@ public class ScanEngine {
             engine.requestHistory.clear();
 
             HttpRequestResponse baseline = ctx.api.http().sendRequest(baseReq);
-            int baseStatus = HttpUtils.statusOf(baseline);
-            int baseLen    = HttpUtils.bodyLen(baseline);
-            int baseWords  = HttpUtils.wordCount(baseline);
-            int baseLines  = HttpUtils.lineCount(baseline);
-            String baseTitle = HttpUtils.getTitle(baseline);
-            String baseHash  = HttpUtils.bodyHash(baseline);
+            int baseStatus    = HttpUtils.statusOf(baseline);
+            int baseLen       = HttpUtils.bodyLen(baseline);
+            String baseBodyStr = HttpUtils.bodyStr(baseline);
+            int baseWords     = HttpUtils.wordCount(baseBodyStr);
+            int baseLines     = HttpUtils.lineCount(baseBodyStr);
+            String baseTitle  = HttpUtils.getTitle(baseBodyStr);
+            String baseHash   = HttpUtils.bodyHash(baseBodyStr);
             engine.baselineStatus = baseStatus;
             finalBaseStatus = baseStatus;
 
@@ -118,9 +143,9 @@ public class ScanEngine {
                 engine.progressBar.setString("0 / " + total);
             });
 
-            int wafThreshold    = (int) ctx.spinWafThreshold.getValue();
-            boolean isParallel  = ctx.chkParallelMode.isSelected();
-            int parallelThreads = isParallel ? Math.max(2, (int) ctx.spinParallelThreads.getValue()) : 1;
+            int wafThreshold    = config.wafThreshold;
+            boolean isParallel  = config.parallel;
+            int parallelThreads = isParallel ? Math.max(2, config.parallelThreads) : 1;
             ExecutorService batchPool = isParallel ? Executors.newFixedThreadPool(parallelThreads) : null;
 
             try {
@@ -145,11 +170,12 @@ public class ScanEngine {
                         engine.requestHistory.put(i + 1, rr);
                         if (rr != null) ctx.api.siteMap().add(rr);
 
+                        String bodyStr = HttpUtils.bodyStr(rr);
                         int st    = HttpUtils.statusOf(rr);
                         int len   = HttpUtils.bodyLen(rr);
-                        int words = HttpUtils.wordCount(rr);
-                        int lines = HttpUtils.lineCount(rr);
-                        String title = HttpUtils.getTitle(rr);
+                        int words = HttpUtils.wordCount(bodyStr);
+                        int lines = HttpUtils.lineCount(bodyStr);
+                        String title = HttpUtils.getTitle(bodyStr);
 
                         totalRttMs += rttMs; rttCount++;
                         long avgMs = totalRttMs / rttCount;
@@ -161,7 +187,7 @@ public class ScanEngine {
 
                         if (st == -1) consecutiveResets++; else consecutiveResets = 0;
 
-                        String notes = computeNotes(rr, st, len, words, baseStatus, baseLen, baseWords, baseHash);
+                        String notes = computeNotes(rr, bodyStr, st, len, words, baseStatus, baseLen, baseWords, baseHash);
                         if (st == 429 || st == 503) notes = "RATE_LIMITED(" + st + ") " + notes;
                         final String finalNotes  = notes.trim();
                         final String finalCache  = HttpUtils.computeCacheStatus(rr);
@@ -215,11 +241,12 @@ public class ScanEngine {
                         engine.requestHistory.put(rowNo, rr);
                         if (rr != null) ctx.api.siteMap().add(rr);
 
+                        String bodyStr = HttpUtils.bodyStr(rr);
                         int st    = HttpUtils.statusOf(rr);
                         int len   = HttpUtils.bodyLen(rr);
-                        int words = HttpUtils.wordCount(rr);
-                        int lines = HttpUtils.lineCount(rr);
-                        String title = HttpUtils.getTitle(rr);
+                        int words = HttpUtils.wordCount(bodyStr);
+                        int lines = HttpUtils.lineCount(bodyStr);
+                        String title = HttpUtils.getTitle(bodyStr);
 
                         totalRttMs += fr.rttMs + currentDelay; rttCount++;
                         long avgMs = totalRttMs / rttCount;
@@ -239,7 +266,7 @@ public class ScanEngine {
                             Thread.sleep(currentDelay);
                         }
 
-                        String notes = computeNotes(rr, st, len, words, baseStatus, baseLen, baseWords, baseHash);
+                        String notes = computeNotes(rr, bodyStr, st, len, words, baseStatus, baseLen, baseWords, baseHash);
                         if (st == 429 || st == 503) notes = "RATE_LIMITED(" + st + ") " + notes;
                         final String finalNotes  = notes.trim();
                         final String finalCache  = HttpUtils.computeCacheStatus(rr);
@@ -327,10 +354,11 @@ public class ScanEngine {
                 SwingUtilities.invokeLater(() -> showWcdSummary(wcc, wpc, wnc, wvc, wpcc, wpv, tu));
             }
 
-            int tabIndex = ctx.mainTabs.indexOfComponent(engine.mainPanel);
+            // flashTab must run on EDT — it creates a Swing Timer
+            final int tabIndex = ctx.mainTabs.indexOfComponent(engine.mainPanel);
             if (tabIndex >= 0) {
-                String origTitle = ctx.mainTabs.getTitleAt(tabIndex);
-                flashTab(tabIndex, origTitle);
+                final String origTitle = ctx.mainTabs.getTitleAt(tabIndex);
+                SwingUtilities.invokeLater(() -> flashTab(tabIndex, origTitle));
             }
 
         } catch (Exception ex) {
@@ -348,7 +376,7 @@ public class ScanEngine {
     // Notes & analysis
     // -------------------------------------------------------------------------
 
-    public String computeNotes(HttpRequestResponse rr, int st, int len, int words,
+    public String computeNotes(HttpRequestResponse rr, String bodyStr, int st, int len, int words,
                                 int baseStatus, int baseLen, int baseWords, String baseHash) {
         StringBuilder notes = new StringBuilder();
 
@@ -365,7 +393,7 @@ public class ScanEngine {
                 notes.append("STATUS_CHANGE ");
         }
 
-        String currentHash = HttpUtils.bodyHash(rr);
+        String currentHash = HttpUtils.bodyHash(bodyStr);
         boolean bodyDiffers = !currentHash.isEmpty() && !baseHash.isEmpty() && !currentHash.equals(baseHash);
         if (bodyDiffers && st == baseStatus) {
             if (st >= 200 && st < 300) notes.append("⚠️ BODY_BYPASS? ");
@@ -393,21 +421,14 @@ public class ScanEngine {
         if (cacheControl.contains("s-maxage")) notes.append("CC:S-MAXAGE ");
         if (!age.isEmpty()) notes.append("Age:").append(age).append(" ");
 
-        HttpUtils.detectSensitiveData(rr, notes);
-        applyCustomRules(rr, notes);
+        HttpUtils.detectSensitiveData(bodyStr, notes);
+        applyCustomRules(bodyStr, notes);
 
         return notes.toString().trim();
     }
 
-    private void applyCustomRules(HttpRequestResponse rr, StringBuilder notes) {
-        if (compiledCustomRules.isEmpty()) return;
-        String body;
-        try {
-            if (rr == null || rr.response() == null) return;
-            body = rr.response().bodyToString();
-            if (body == null || body.isEmpty()) return;
-        } catch (Exception e) { return; }
-
+    private void applyCustomRules(String body, StringBuilder notes) {
+        if (compiledCustomRules.isEmpty() || body == null || body.isEmpty()) return;
         for (Object[] rule : compiledCustomRules) {
             if (((Pattern) rule[0]).matcher(body).find())
                 notes.append("CUSTOM:").append(rule[1]).append(" ");
@@ -533,7 +554,9 @@ public class ScanEngine {
                 break;
             default: return;
         }
-        ctx.taskExecutor.submit(() -> startFuzzing(rr, engine, variants, delay));
+        // rerunFuzzing is called from EDT (button listener) — safe to read UI here
+        ScanConfig cfg = new ScanConfig(ctx);
+        ctx.taskExecutor.submit(() -> startFuzzing(rr, engine, variants, delay, cfg));
     }
 
     public void showPayloadPreview(FuzzerEngine engine) {

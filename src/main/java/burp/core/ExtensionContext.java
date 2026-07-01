@@ -9,7 +9,7 @@ import java.util.concurrent.ExecutorService;
 
 public class ExtensionContext {
 
-    public static final String VERSION = "2.3.1";
+    public static final String VERSION = "2.3.2";
     public static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     public final MontoyaApi api;
