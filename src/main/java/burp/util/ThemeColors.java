@@ -12,7 +12,7 @@ public final class ThemeColors {
     private static volatile boolean cachedDark = computeIsDark();
 
     static {
-        UIManager.addPropertyChangeListener("lookAndFeel", evt -> cachedDark = computeIsDark());
+        UIManager.addPropertyChangeListener(evt -> { if ("lookAndFeel".equals(evt.getPropertyName())) cachedDark = computeIsDark(); });
     }
 
     private static boolean computeIsDark() {
