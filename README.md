@@ -67,6 +67,18 @@ Instead of manually crafting dozens of header and path variations, this extensio
 
 ## 🌟 What's New in v2.3.1
 
+- 🐛 **Session drift dialog thread fix:** The mid-scan session health check was showing a confirmation dialog from the background fuzzing thread — a Swing threading violation that could deadlock on certain systems. Now correctly dispatched via `invokeAndWait`.
+- 🐛 **`bodyHash()` null safety:** Responses with no body (204 No Content, HEAD) caused a silent NPE inside the hash function. Added a null check before reading body bytes.
+- 🐛 **CSV export newline escaping:** Notes column entries containing embedded newlines (multiple flags on one row) were breaking CSV row boundaries. Newlines are now replaced with a space before writing.
+- ⚡ **Custom rule regex pre-compilation:** Detection rules (Settings tab) were being compiled from scratch on every response — O(variants × rules) `Pattern.compile()` calls per scan. Rules are now compiled once at scan start and reused.
+- ⚡ **`getTitle()` static pattern:** The HTML title regex was being compiled on every invocation. Moved to a `static final` constant.
+- ⚡ **`wordCount()` allocation fix:** Body was being split into a full `String[]` array just to call `.length`. Replaced with `StringTokenizer.countTokens()` — no heap allocation.
+- ⚡ **`lineCount()` allocation fix:** Same issue. Replaced `split()` with a single-pass character loop.
+
+---
+
+## 🌟 What's New in v2.3.0
+
 - 📊 **Cache Status Column:** Results table now has a dedicated **Cache** column showing `HIT ✅`, `MISS`, `PRIVATE 🚫`, `NO-STORE 🚫`, `HIT/Vary:Cookie`, or the raw `X-Cache` value. WCD triage without reading the Notes column.
 - 🌐 **CDN Profile Selector:** Pick your target's CDN (Cloudflare, Akamai, Fastly, CloudFront, Nginx, Varnish) in the Path engine. Delimiter payloads are filtered to that CDN's known delimiter set — less noise, more signal.
 - 🏋️ **Fat GET:** New checkbox in Path engine. Sends the request as a GET with a body. CDNs key the cache on path and ignore the body; some origins behave differently. Surfaces WCD vectors that path-only testing misses.
