@@ -103,10 +103,10 @@ public class HeaderPayloadBuilder {
             out.add(new Variant("SCHEME: Front-End-Https=on",       EncoderUtils.addOrReplaceHeader(baseReq, "Front-End-Https",    "on")));
             out.add(new Variant("SCHEME: X-Forwarded-Ssl=on",       EncoderUtils.addOrReplaceHeader(baseReq, "X-Forwarded-Ssl",   "on")));
         }
-        for (String ip : ctx.txtHeaderIPs.getText().split("\n"))
+        for (String ip : ctx.txtHeaderIPs.getText().split("\\r?\\n"))
             if (!ip.trim().isEmpty())
                 out.add(new Variant("CUSTOM IP: " + ip.trim(), EncoderUtils.addOrReplaceHeader(baseReq, "X-Forwarded-For", ip.trim())));
-        for (String hdr : ctx.txtHeaderHeaders.getText().split("\n"))
+        for (String hdr : ctx.txtHeaderHeaders.getText().split("\\r?\\n"))
             if (hdr.contains(":")) {
                 String[] p = hdr.split(":", 2);
                 out.add(new Variant("CUSTOM HDR: " + p[0].trim(), EncoderUtils.addOrReplaceHeader(baseReq, p[0].trim(), p[1].trim())));
