@@ -65,7 +65,7 @@ Instead of manually crafting dozens of header and path variations, this extensio
 
 ---
 
-## 🌟 What's New in v2.3.0
+## 🌟 What's New in v2.3.1
 
 - 📊 **Cache Status Column:** Results table now has a dedicated **Cache** column showing `HIT ✅`, `MISS`, `PRIVATE 🚫`, `NO-STORE 🚫`, `HIT/Vary:Cookie`, or the raw `X-Cache` value. WCD triage without reading the Notes column.
 - 🌐 **CDN Profile Selector:** Pick your target's CDN (Cloudflare, Akamai, Fastly, CloudFront, Nginx, Varnish) in the Path engine. Delimiter payloads are filtered to that CDN's known delimiter set — less noise, more signal.
@@ -521,7 +521,7 @@ mvn compile
 # Build JAR with dependencies
 mvn package
 
-# Output: target/access-context-fuzzer-2.3.0-jar-with-dependencies.jar
+# Output: target/access-context-fuzzer-2.3.1-jar-with-dependencies.jar
 ```
 
 ### Project Structure
