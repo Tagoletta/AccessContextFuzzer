@@ -23,9 +23,28 @@ import java.util.regex.Pattern;
 public class ScanEngine {
 
     private final ExtensionContext ctx;
+    private volatile List<Object[]> compiledCustomRules = new ArrayList<>();
 
     public ScanEngine(ExtensionContext ctx) {
         this.ctx = ctx;
+    }
+
+    private static List<Object[]> buildCompiledRules(String rulesText) {
+        List<Object[]> result = new ArrayList<>();
+        if (rulesText == null || rulesText.isBlank()) return result;
+        for (String line : rulesText.split("\n")) {
+            line = line.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            int eq = line.lastIndexOf('=');
+            if (eq < 1) continue;
+            String regex = line.substring(0, eq).trim();
+            String label = line.substring(eq + 1).trim();
+            if (label.isEmpty()) continue;
+            try {
+                result.add(new Object[]{Pattern.compile(regex, Pattern.CASE_INSENSITIVE | Pattern.DOTALL), label});
+            } catch (Exception ignored) {}
+        }
+        return result;
     }
 
     // -------------------------------------------------------------------------
@@ -66,6 +85,8 @@ public class ScanEngine {
                 } catch (Exception ignored) {}
             }
         });
+
+        compiledCustomRules = buildCompiledRules(ctx.txtDetectRules.getText());
 
         int processedCount = 0, interestingCount = 0, bypassCount = 0, finalBaseStatus = -1;
         int wcdCachedCount = 0, wcdPrivateCount = 0, wcdNoStoreCount = 0;
@@ -269,11 +290,15 @@ public class ScanEngine {
                                         engine.progressBar.setString("Session drift detected!");
                                         engine.progressBar.setForeground(new Color(255, 165, 0));
                                     });
-                                    int choice = JOptionPane.showConfirmDialog(null,
-                                            "Session Drift Detected!\n\nBaseline was " + oldSt + " but now returns " + newSt + ".\n"
-                                            + "Your session may have expired or been invalidated.\n\nContinue scanning?",
-                                            "Session Health Warning", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-                                    if (choice != JOptionPane.YES_OPTION) { engine.isRunning.set(false); break; }
+                                    final int[] choiceBox = {JOptionPane.YES_OPTION};
+                                    try {
+                                        SwingUtilities.invokeAndWait(() ->
+                                            choiceBox[0] = JOptionPane.showConfirmDialog(null,
+                                                "Session Drift Detected!\n\nBaseline was " + oldSt + " but now returns " + newSt + ".\n"
+                                                + "Your session may have expired or been invalidated.\n\nContinue scanning?",
+                                                "Session Health Warning", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE));
+                                    } catch (Exception ignored) {}
+                                    if (choiceBox[0] != JOptionPane.YES_OPTION) { engine.isRunning.set(false); break; }
                                 }
                             } catch (Exception ex) {
                                 ctx.api.logging().logToError("[ACF] Session check error: " + ex.getMessage());
@@ -375,8 +400,7 @@ public class ScanEngine {
     }
 
     private void applyCustomRules(HttpRequestResponse rr, StringBuilder notes) {
-        String rulesText = ctx.txtDetectRules.getText().trim();
-        if (rulesText.isEmpty()) return;
+        if (compiledCustomRules.isEmpty()) return;
         String body;
         try {
             if (rr == null || rr.response() == null) return;
@@ -384,18 +408,9 @@ public class ScanEngine {
             if (body == null || body.isEmpty()) return;
         } catch (Exception e) { return; }
 
-        for (String line : rulesText.split("\n")) {
-            line = line.trim();
-            if (line.isEmpty() || line.startsWith("#")) continue;
-            int eq = line.lastIndexOf('=');
-            if (eq < 1) continue;
-            String regex = line.substring(0, eq).trim();
-            String label = line.substring(eq + 1).trim();
-            if (label.isEmpty()) continue;
-            try {
-                if (Pattern.compile(regex, Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(body).find())
-                    notes.append("CUSTOM:").append(label).append(" ");
-            } catch (Exception ignored) {}
+        for (Object[] rule : compiledCustomRules) {
+            if (((Pattern) rule[0]).matcher(body).find())
+                notes.append("CUSTOM:").append(rule[1]).append(" ");
         }
     }
 

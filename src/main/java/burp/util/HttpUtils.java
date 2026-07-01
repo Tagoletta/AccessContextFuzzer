@@ -31,7 +31,8 @@ public class HttpUtils {
 
     public static String bodyHash(HttpRequestResponse rr) {
         try {
-            byte[] body = rr.response().body().getBytes();
+            var rawBody = rr.response().body();
+            byte[] body = rawBody == null ? new byte[0] : rawBody.getBytes();
             MessageDigest md = MessageDigest.getInstance("MD5");
             byte[] digest = md.digest(body);
             StringBuilder sb = new StringBuilder();
@@ -42,11 +43,14 @@ public class HttpUtils {
         }
     }
 
+    private static final Pattern PATTERN_TITLE =
+            Pattern.compile("<title>(.*?)</title>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
     public static String getTitle(HttpRequestResponse rr) {
         try {
             String b = rr.response().bodyToString();
             if (b == null) return "";
-            Matcher m = Pattern.compile("<title>(.*?)</title>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(b);
+            Matcher m = PATTERN_TITLE.matcher(b);
             if (m.find()) return m.group(1).trim().replaceAll("\\s+", " ");
         } catch (Throwable t) {}
         return "";
@@ -81,14 +85,22 @@ public class HttpUtils {
     public static int wordCount(HttpRequestResponse rr) {
         try {
             String b = rr.response().bodyToString();
-            return (b == null || b.trim().isEmpty()) ? 0 : b.trim().split("\\s+").length;
+            if (b == null || b.isEmpty()) return 0;
+            return new java.util.StringTokenizer(b).countTokens();
         } catch (Throwable t) { return 0; }
     }
 
     public static int lineCount(HttpRequestResponse rr) {
         try {
             String b = rr.response().bodyToString();
-            return (b == null || b.isEmpty()) ? 0 : b.split("\r\n|\r|\n").length;
+            if (b == null || b.isEmpty()) return 0;
+            int count = 1;
+            for (int i = 0; i < b.length(); i++) {
+                char c = b.charAt(i);
+                if (c == '\n') { count++; }
+                else if (c == '\r') { count++; if (i + 1 < b.length() && b.charAt(i + 1) == '\n') i++; }
+            }
+            return count;
         } catch (Throwable t) { return 0; }
     }
 

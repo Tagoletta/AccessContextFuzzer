@@ -345,7 +345,9 @@ public class ResultsPanel {
                 for (int r = 0; r < m.getRowCount(); r++) {
                     for (int c = 0; c < m.getColumnCount(); c++) {
                         Object v = m.getValueAt(r, c);
-                        String s = (v == null) ? "" : v.toString().replace("\"", "\"\"");
+                        String s = (v == null) ? "" : v.toString()
+                                .replace("\"", "\"\"")
+                                .replace("\r\n", " ").replace("\r", " ").replace("\n", " ");
                         pw.print("\"" + s + "\"" + (c == m.getColumnCount() - 1 ? "" : ","));
                     }
                     pw.println();
