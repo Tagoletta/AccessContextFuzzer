@@ -163,7 +163,7 @@ public class ScanEngine {
                     for (int i = 0; i < futures.size() && engine.isRunning.get(); i++) {
                         FuzzResult fr;
                         try { fr = futures.get(i).get(60, TimeUnit.SECONDS); }
-                        catch (TimeoutException te) { fr = new FuzzResult(null, 60000); }
+                        catch (TimeoutException te) { futures.get(i).cancel(true); fr = new FuzzResult(null, 60000); }
 
                         HttpRequestResponse rr = fr != null ? fr.rr : null;
                         long rttMs = fr != null ? fr.rttMs : 0;
@@ -354,12 +354,11 @@ public class ScanEngine {
                 SwingUtilities.invokeLater(() -> showWcdSummary(wcc, wpc, wnc, wvc, wpcc, wpv, tu));
             }
 
-            // flashTab must run on EDT — it creates a Swing Timer
-            final int tabIndex = ctx.mainTabs.indexOfComponent(engine.mainPanel);
-            if (tabIndex >= 0) {
-                final String origTitle = ctx.mainTabs.getTitleAt(tabIndex);
-                SwingUtilities.invokeLater(() -> flashTab(tabIndex, origTitle));
-            }
+            // flashTab must run on EDT — it creates a Swing Timer; index reads must be on EDT too
+            SwingUtilities.invokeLater(() -> {
+                int idx = ctx.mainTabs.indexOfComponent(engine.mainPanel);
+                if (idx >= 0) flashTab(idx, ctx.mainTabs.getTitleAt(idx));
+            });
 
         } catch (Exception ex) {
             ctx.api.logging().logToError("[ACF] Fuzzing error in " + engine.engineType + ": " + ex.getMessage());
@@ -631,7 +630,7 @@ public class ScanEngine {
             try {
                 HttpService service = HttpService.httpService("api.ipify.org", 443, true);
                 HttpRequest req = HttpRequest.httpRequest(service,
-                        "GET / HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\nAccept: */*\r\nUser-Agent: AccessContext/3.0\r\n\r\n");
+                        "GET / HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\nAccept: */*\r\nUser-Agent: AccessContextFuzzer/" + ExtensionContext.VERSION + "\r\n\r\n");
                 HttpRequestResponse res = ctx.api.http().sendRequest(req);
                 if (res.response() != null && res.response().statusCode() == 200) {
                     String ip = res.response().bodyToString().trim();
@@ -671,10 +670,11 @@ public class ScanEngine {
 
     public void appendScanHistory(String engineType, String targetUrl,
                                    int total, int interesting, int bypasses, int baseStatus) {
-        int rowNum = ctx.historyModel.getRowCount() + 1;
         String ts = LocalDateTime.now().format(ExtensionContext.TS_FMT);
-        SwingUtilities.invokeLater(() ->
-                ctx.historyModel.addRow(new Object[]{rowNum, engineType, targetUrl, ts, total, interesting, bypasses, baseStatus}));
+        SwingUtilities.invokeLater(() -> {
+            int rowNum = ctx.historyModel.getRowCount() + 1;
+            ctx.historyModel.addRow(new Object[]{rowNum, engineType, targetUrl, ts, total, interesting, bypasses, baseStatus});
+        });
     }
 
     // -------------------------------------------------------------------------

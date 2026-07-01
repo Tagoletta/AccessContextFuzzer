@@ -33,7 +33,7 @@ public class SelectionPayloadBuilder {
             out.add(createSelVar(baseReq.httpService(), before, after, "SEL: IIS Unicode", EncoderUtils.iisUnicodeEncode(selected)));
         if (ctx.chkSelUtf.isSelected())
             out.add(createSelVar(baseReq.httpService(), before, after, "SEL: UTF-8 Fullwidth", selected.replace("/", "/%ef%bc%8f")));
-        for (String p : ctx.txtSelCustom.getText().split("\n"))
+        for (String p : ctx.txtSelCustom.getText().split("\\r?\\n"))
             if (!p.trim().isEmpty())
                 out.add(createSelVar(baseReq.httpService(), before, after, "SEL: " + p.trim(), p.trim()));
         return out;

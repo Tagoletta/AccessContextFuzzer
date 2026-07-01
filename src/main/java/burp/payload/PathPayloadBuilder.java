@@ -155,7 +155,7 @@ public class PathPayloadBuilder {
                            .withAddedHeader("Content-Length", String.valueOf(cb.length()))
                            .withBody(cb)));
         }
-        for (String p : ctx.txtPathPaths.getText().split("\n"))
+        for (String p : ctx.txtPathPaths.getText().split("\\r?\\n"))
             if (!p.trim().isEmpty())
                 out.add(new Variant("CUSTOM PATH: " + p.trim(), baseReq.withPath(p.trim())));
         return out;

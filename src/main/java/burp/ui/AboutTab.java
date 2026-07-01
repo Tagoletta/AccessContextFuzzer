@@ -25,7 +25,10 @@ public class AboutTab {
         // Open links in the system browser
         editor.addHyperlinkListener(e -> {
             if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED && e.getURL() != null) {
-                try { Desktop.getDesktop().browse(e.getURL().toURI()); } catch (Exception ignored) {}
+                try {
+                    java.net.URI uri = e.getURL().toURI();
+                    new Thread(() -> { try { Desktop.getDesktop().browse(uri); } catch (Exception ignored) {} }).start();
+                } catch (Exception ignored) {}
             }
         });
 
