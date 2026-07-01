@@ -128,13 +128,13 @@ public class HttpUtils {
     public static String computeCacheStatus(HttpRequestResponse rr) {
         try {
             String xCache = getHeaderValue(rr, "X-Cache");
-            String cc     = getHeaderValue(rr, "Cache-Control").toLowerCase();
-            String vary   = getHeaderValue(rr, "Vary").toLowerCase();
+            String cc     = getHeaderValue(rr, "Cache-Control").toLowerCase(java.util.Locale.ROOT);
+            String vary   = getHeaderValue(rr, "Vary").toLowerCase(java.util.Locale.ROOT);
             if (cc.contains("no-store")) return "NO-STORE 🚫";
             if (cc.contains("private"))  return "PRIVATE 🚫";
-            if (xCache.toUpperCase().contains("HIT"))
+            if (xCache.toUpperCase(java.util.Locale.ROOT).contains("HIT"))
                 return vary.contains("cookie") ? "HIT/Vary:Cookie" : "HIT ✅";
-            if (xCache.toUpperCase().contains("MISS")) return "MISS";
+            if (xCache.toUpperCase(java.util.Locale.ROOT).contains("MISS")) return "MISS";
             if (!xCache.isEmpty()) return xCache;
             if (cc.contains("s-maxage")) return "CDN-CACHE?";
             return "?";

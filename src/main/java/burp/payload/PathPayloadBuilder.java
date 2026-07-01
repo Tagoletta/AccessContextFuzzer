@@ -83,7 +83,7 @@ public class PathPayloadBuilder {
             if (suffix.isEmpty()) suffix = "abc";
             String[] staticExts = {".js", ".css", ".png", ".jpg", ".gif", ".svg", ".ico", ".woff", ".woff2",
                     ".ttf", ".eot", ".map", ".json", ".xml", ".yaml", ".webp", ".avif", ".txt", ".pdf"};
-            String[] testDelims = {"?", "%23", "%3f", "%3F", ";", "%3b", "%3B"};
+            String[] testDelims = {"?", "%23", "%3f", "%3F", ";", "%3b", "%3B", "/"};
             for (String d : testDelims)
                 for (String ext : staticExts)
                     out.add(new Variant("DELIM+EXT: '" + d + "' + " + ext,
