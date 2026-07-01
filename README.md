@@ -65,6 +65,31 @@ Instead of manually crafting dozens of header and path variations, this extensio
 
 ---
 
+## 🌟 What's New in v2.4.0
+
+**Web Cache Deception — detection that actually confirms**
+- 🐛 **Critical: Turkish-locale `toUpperCase()`/`toLowerCase()` broke all cache detection.** On a Turkish-locale JVM, `"hit".toUpperCase()` yields `"HİT"` (dotted capital İ, U+0130) — so `xCache.toUpperCase().contains("HIT")` was always `false`, and the same trap silently broke `private` → `prıvate` and `no-store` matching. Every `X-Cache` / `Cache-Control` / `Vary` comparison in `ScanEngine` and `HttpUtils` now uses `Locale.ROOT`. This is why cacheable responses were reported as `MISS` even though every resend was really a `HIT`.
+- 🎯 **`/` delimiter for path-mapping WCD:** The Delimiter + Extension phase now also tests `/path/abc.js` (the exact vector behind PortSwigger's *"Exploiting path mapping"* lab), not just query/encoded delimiters.
+- 🔁 **Automatic MISS→HIT confirmation:** When a variant returns a cacheable `200` `X-Cache: MISS` with `max-age`/`s-maxage`, the scanner resends the *same* request a few times inside the cache window. If `X-Cache` flips to `HIT`, the row is flagged **`🎯 WCD CONFIRMED (MISS→HIT)`** and shown as `HIT ✅` — the cache-warming step is now automatic instead of a manual Repeater round-trip.
+
+**Verify WCD — warm + no-auth replay**
+- 🔓 **Rewritten `Verify WCD` (right-click):** The old one-shot no-auth replay produced false negatives (a cold cache returns `302 / MISS` even on a cacheable URL). It now (1) **warms** the cache with your current auth until the entry is `HIT`, then (2) **replays without cookies/auth** and compares bodies. A confirmed leak requires a no-auth `HIT` whose body matches the authenticated response (or contains sensitive data) — cleanly separating `✅ CONFIRMED WCD` from `⚠️ HIT but content differs` and `❌ not cached without auth`. Works on whichever message (request **or** response) is open.
+
+**New: 🎯 WCD Findings tab**
+- 🗂️ A dedicated tab collects every WCD result — both the scanner's automatic MISS→HIT confirmations and manual verifications — with URL, auth/no-auth status, `X-Cache`, verdict, and timestamp. **Double-click a row to open the request/response that proves it.** No more transient popups with no history.
+
+**UI & reporting**
+- 🏷️ **Status moved to a proper label:** The cramped, text-truncated progress bar now shows just the bar; the run summary lives in a clean label — `✅ Done — N sent | M findings | B 🎯 bypass | W 🎯 WCD cacheable | Re-run available`.
+- 🎯 **Cache HITs count as findings:** Confirmed MISS→HIT results are now included in the bypass tally and surfaced via a dedicated *WCD cacheable* counter (previously always reported `0 bypasses`).
+- 🔎 **Tightened "interesting":** Only real findings (bypass, WCD confirmed, cache-hit, sensitive data, custom-rule hits) count as *interesting* and pass the *Show Only Interesting* filter — baseline noise (`STATUS_CHANGE` / `WORD_DELTA` / `LEN_DELTA` / `X-Cache:miss`) no longer inflates the count.
+- 🌐 **English dialogs:** The WCD verification and scan-summary dialogs are now fully English.
+
+**Settings**
+- ⚙️ **OPSEC & Network moved to Settings:** The *Check External IP* / *Delay* panel was removed from the Header, Path, and Selection tabs and consolidated into a single section at the top of **Settings & History**, separated from per-engine payload options.
+- 💾 **Single, persisted delay:** The three per-engine delays are unified into one `Delay (ms)` that all engines share and that is saved across restarts (key `acf.delay`; a legacy `acf.path.delay` is migrated automatically).
+
+---
+
 ## 🌟 What's New in v2.3.2
 
 **Bug Fixes**
@@ -558,7 +583,7 @@ mvn compile
 # Build JAR with dependencies
 mvn package
 
-# Output: target/access-context-fuzzer-2.3.1-jar-with-dependencies.jar
+# Output: target/access-context-fuzzer-2.4.0-jar-with-dependencies.jar
 ```
 
 ### Project Structure
