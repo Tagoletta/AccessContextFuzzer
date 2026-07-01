@@ -13,6 +13,7 @@ public class FuzzerEngine {
     public DefaultTableModel model;
     public JTable table;
     public JProgressBar progressBar;
+    public JLabel lblStatus;
     public JButton btnStop;
     public JButton btnExport;
     public JButton btnRerun;

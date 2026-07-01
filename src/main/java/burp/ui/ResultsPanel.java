@@ -35,7 +35,10 @@ public class ResultsPanel {
 
         engine.progressBar = new JProgressBar(0, 100);
         engine.progressBar.setStringPainted(true);
-        engine.progressBar.setPreferredSize(new Dimension(300, 25));
+        engine.progressBar.setPreferredSize(new Dimension(220, 25));
+
+        engine.lblStatus = new JLabel("Idle — right-click a request in Burp and choose an Access Context action.");
+        engine.lblStatus.setFont(engine.lblStatus.getFont().deriveFont(Font.BOLD));
 
         engine.btnStop = new JButton("Stop Fuzzing");
         engine.btnStop.setEnabled(false);
@@ -62,7 +65,14 @@ public class ResultsPanel {
         controlPanel.add(engine.btnFilter);
         controlPanel.add(engine.btnPreview);
         controlPanel.add(engine.btnExport);
-        resultsPanel.add(controlPanel, BorderLayout.NORTH);
+
+        JPanel statusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        statusPanel.add(engine.lblStatus);
+
+        JPanel northPanel = new JPanel(new BorderLayout());
+        northPanel.add(controlPanel, BorderLayout.NORTH);
+        northPanel.add(statusPanel, BorderLayout.SOUTH);
+        resultsPanel.add(northPanel, BorderLayout.NORTH);
 
         // Columns: #, Variant, Status, Cache, Words, Lines, Length, Title, RTT(ms), Notes
         engine.model = new DefaultTableModel(
@@ -179,7 +189,7 @@ public class ResultsPanel {
                 String notes = (String) engine.model.getValueAt(i, 9);
                 int reqId = (int) engine.model.getValueAt(i, 0);
                 if (reqId == 0) continue;
-                if (notes != null && !notes.isEmpty()) {
+                if (ScanEngine.isInterestingNote(notes)) {
                     HttpRequestResponse rrData = engine.requestHistory.get(reqId);
                     if (rrData != null) {
                         ctx.api.repeater().sendToRepeater(rrData.request(),
@@ -218,7 +228,7 @@ public class ResultsPanel {
         });
     }
 
-    private static void showRequestResponseDialog(ExtensionContext ctx,
+    public static void showRequestResponseDialog(ExtensionContext ctx,
                                                    HttpRequestResponse rr, String title) {
         Frame burpFrame = (Frame) SwingUtilities.getAncestorOfClass(Frame.class, ctx.mainTabs);
         JDialog dialog = new JDialog(burpFrame, title, false);
@@ -320,7 +330,7 @@ public class ResultsPanel {
                 public boolean include(Entry<?, ?> entry) {
                     String notes = entry.getStringValue(9);
                     int rowIdx = (int) entry.getValue(0);
-                    return rowIdx == 0 || (notes != null && !notes.isEmpty());
+                    return rowIdx == 0 || ScanEngine.isInterestingNote(notes);
                 }
             });
             engine.filterActive.set(true);

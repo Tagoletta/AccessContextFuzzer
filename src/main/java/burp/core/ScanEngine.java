@@ -87,6 +87,53 @@ public class ScanEngine {
         }
     }
 
+    private static String safeUrl(HttpRequest req) {
+        try { return req.url(); } catch (Exception e) {
+            try { return req.path(); } catch (Exception e2) { return "(unknown)"; }
+        }
+    }
+
+    /** Carries the (possibly upgraded) result plus whether a MISS→HIT was confirmed. */
+    private static final class WcdCheck {
+        final FuzzResult fr;
+        final boolean confirmed;
+        WcdCheck(FuzzResult fr, boolean confirmed) { this.fr = fr; this.confirmed = confirmed; }
+    }
+
+    /**
+     * WCD cache verification. When a response is a cacheable 200 MISS, resend the
+     * SAME request a few times within the cache window to see whether X-Cache flips
+     * to HIT. On confirmation, returns the HIT result (so the row shows the cached
+     * response) and confirmed=true; otherwise returns the original result unchanged.
+     */
+    private WcdCheck verifyWcdMissToHit(FuzzResult fr, HttpRequest req) throws InterruptedException {
+        if (fr == null || fr.rr == null) return new WcdCheck(fr, false);
+        String xcV = HttpUtils.getHeaderValue(fr.rr, "X-Cache").toUpperCase(java.util.Locale.ROOT);
+        String ccV = HttpUtils.getHeaderValue(fr.rr, "Cache-Control").toLowerCase(java.util.Locale.ROOT);
+        boolean isMissAndCacheable = HttpUtils.statusOf(fr.rr) == 200
+                && !ccV.contains("private") && !ccV.contains("no-store")
+                && (ccV.contains("max-age") || ccV.contains("s-maxage"))
+                && (xcV.isEmpty() || !xcV.contains("HIT"));
+        if (!isMissAndCacheable) return new WcdCheck(fr, false);
+        ctx.api.logging().logToOutput("[ACF-WCD] Cacheable MISS → verifying: " + req.path());
+        for (int attempt = 1; attempt <= 4; attempt++) {
+            Thread.sleep(250);
+            FuzzResult fr2 = executeSingle(req);
+            if (fr2 != null && fr2.rr != null) {
+                String xc2 = HttpUtils.getHeaderValue(fr2.rr, "X-Cache").toUpperCase(java.util.Locale.ROOT);
+                String age2 = HttpUtils.getHeaderValue(fr2.rr, "Age");
+                ctx.api.logging().logToOutput("[ACF-WCD] attempt=" + attempt + " X-Cache=" + xc2
+                        + (age2.isEmpty() ? "" : " Age=" + age2) + " path=" + req.path());
+                if (xc2.contains("HIT")) {
+                    ctx.api.logging().logToOutput("[ACF-WCD] ✅ CONFIRMED miss→hit: " + req.path());
+                    return new WcdCheck(fr2, true);
+                }
+            }
+        }
+        ctx.api.logging().logToOutput("[ACF-WCD] not confirmed (stayed MISS): " + req.path());
+        return new WcdCheck(fr, false);
+    }
+
     public void startFuzzing(HttpRequestResponse baseRr, FuzzerEngine engine,
                               List<Variant> variants, int delayMs, ScanConfig config) {
         engine.lastRequest = baseRr;
@@ -97,6 +144,7 @@ public class ScanEngine {
             engine.model.setRowCount(0);
             engine.progressBar.setValue(0);
             engine.progressBar.setForeground(new Color(76, 175, 80));
+            if (engine.lblStatus != null) engine.lblStatus.setText("Scanning…");
             if (engine.filterActive.get()) {
                 try {
                     javax.swing.table.TableRowSorter<?> sorter =
@@ -114,8 +162,9 @@ public class ScanEngine {
 
         int processedCount = 0, interestingCount = 0, bypassCount = 0, finalBaseStatus = -1;
         int wcdCachedCount = 0, wcdPrivateCount = 0, wcdNoStoreCount = 0;
-        int wcdVaryCookieCount = 0, wcdPotentialCount = 0;
+        int wcdVaryCookieCount = 0, wcdPotentialCount = 0, wcdConfirmedCount = 0;
         List<String> wcdPotentialVariants = new ArrayList<>();
+        List<String> wcdConfirmedVariants = new ArrayList<>();
 
         try {
             HttpRequest baseReq = baseRr.request();
@@ -165,6 +214,10 @@ public class ScanEngine {
                         try { fr = futures.get(i).get(60, TimeUnit.SECONDS); }
                         catch (TimeoutException te) { futures.get(i).cancel(true); fr = new FuzzResult(null, 60000); }
 
+                        // WCD cache verification: cacheable MISS → resend to confirm HIT
+                        WcdCheck wcd = verifyWcdMissToHit(fr, variants.get(i).request);
+                        fr = wcd.fr;
+                        boolean wcdConfirmed = wcd.confirmed;
                         HttpRequestResponse rr = fr != null ? fr.rr : null;
                         long rttMs = fr != null ? fr.rttMs : 0;
                         engine.requestHistory.put(i + 1, rr);
@@ -189,6 +242,7 @@ public class ScanEngine {
 
                         String notes = computeNotes(rr, bodyStr, st, len, words, baseStatus, baseLen, baseWords, baseHash);
                         if (st == 429 || st == 503) notes = "RATE_LIMITED(" + st + ") " + notes;
+                        if (wcdConfirmed) notes = "🎯 WCD CONFIRMED (MISS→HIT) " + notes;
                         final String finalNotes  = notes.trim();
                         final String finalCache  = HttpUtils.computeCacheStatus(rr);
                         final String varName     = variants.get(i).name;
@@ -196,9 +250,9 @@ public class ScanEngine {
                         final String finalEta    = etaStr;
                         final int finalRtt       = (int) rttMs;
 
-                        String rrCC = HttpUtils.getHeaderValue(rr, "Cache-Control").toLowerCase();
-                        String rrXC = HttpUtils.getHeaderValue(rr, "X-Cache").toUpperCase();
-                        String rrVary = HttpUtils.getHeaderValue(rr, "Vary").toLowerCase();
+                        String rrCC = HttpUtils.getHeaderValue(rr, "Cache-Control").toLowerCase(java.util.Locale.ROOT);
+                        String rrXC = HttpUtils.getHeaderValue(rr, "X-Cache").toUpperCase(java.util.Locale.ROOT);
+                        String rrVary = HttpUtils.getHeaderValue(rr, "Vary").toLowerCase(java.util.Locale.ROOT);
                         boolean rrHit = rrXC.contains("HIT");
                         if (rrHit) wcdCachedCount++;
                         if (rrCC.contains("private"))  wcdPrivateCount++;
@@ -208,6 +262,11 @@ public class ScanEngine {
                             wcdPotentialCount++;
                             wcdPotentialVariants.add(varName);
                         }
+                        if (wcdConfirmed) {
+                            wcdConfirmedCount++; wcdConfirmedVariants.add(varName);
+                            addWcdFinding("Scan (auto)", safeUrl(variants.get(i).request), String.valueOf(st),
+                                    "—", "HIT", "🎯 Cacheable MISS→HIT — run no-auth verify to confirm WCD", rr);
+                        }
 
                         SwingUtilities.invokeLater(() -> {
                             engine.model.addRow(new Object[]{rowNo, varName, st, finalCache, words, lines, len, title, finalRtt, finalNotes});
@@ -216,8 +275,8 @@ public class ScanEngine {
                         });
 
                         processedCount++;
-                        if (!finalNotes.isEmpty())                   interestingCount++;
-                        if (finalNotes.contains("POTENTIAL BYPASS")) bypassCount++;
+                        if (isInterestingNote(finalNotes))           interestingCount++;
+                        if (finalNotes.contains("POTENTIAL BYPASS") || wcdConfirmed) bypassCount++;
 
                         if (consecutiveResets >= wafThreshold) {
                             engine.isRunning.set(false);
@@ -237,6 +296,10 @@ public class ScanEngine {
 
                         final int rowNo = idx++;
                         FuzzResult fr = executeSingle(v.request);
+                        // WCD cache verification: cacheable MISS → resend to confirm HIT
+                        WcdCheck wcd = verifyWcdMissToHit(fr, v.request);
+                        fr = wcd.fr;
+                        boolean wcdConfirmed = wcd.confirmed;
                         HttpRequestResponse rr = fr.rr;
                         engine.requestHistory.put(rowNo, rr);
                         if (rr != null) ctx.api.siteMap().add(rr);
@@ -268,15 +331,16 @@ public class ScanEngine {
 
                         String notes = computeNotes(rr, bodyStr, st, len, words, baseStatus, baseLen, baseWords, baseHash);
                         if (st == 429 || st == 503) notes = "RATE_LIMITED(" + st + ") " + notes;
+                        if (wcdConfirmed) notes = "🎯 WCD CONFIRMED (MISS→HIT) " + notes;
                         final String finalNotes  = notes.trim();
                         final String finalCache  = HttpUtils.computeCacheStatus(rr);
                         final String finalVName  = v.name;
                         final String finalEta    = etaStr;
                         final int finalRtt       = (int) fr.rttMs;
 
-                        String rrCC = HttpUtils.getHeaderValue(rr, "Cache-Control").toLowerCase();
-                        String rrXC = HttpUtils.getHeaderValue(rr, "X-Cache").toUpperCase();
-                        String rrVary = HttpUtils.getHeaderValue(rr, "Vary").toLowerCase();
+                        String rrCC = HttpUtils.getHeaderValue(rr, "Cache-Control").toLowerCase(java.util.Locale.ROOT);
+                        String rrXC = HttpUtils.getHeaderValue(rr, "X-Cache").toUpperCase(java.util.Locale.ROOT);
+                        String rrVary = HttpUtils.getHeaderValue(rr, "Vary").toLowerCase(java.util.Locale.ROOT);
                         boolean rrHit = rrXC.contains("HIT");
                         if (rrHit) wcdCachedCount++;
                         if (rrCC.contains("private"))  wcdPrivateCount++;
@@ -286,6 +350,11 @@ public class ScanEngine {
                             wcdPotentialCount++;
                             wcdPotentialVariants.add(finalVName);
                         }
+                        if (wcdConfirmed) {
+                            wcdConfirmedCount++; wcdConfirmedVariants.add(finalVName);
+                            addWcdFinding("Scan (auto)", safeUrl(v.request), String.valueOf(st),
+                                    "—", "HIT", "🎯 Cacheable MISS→HIT — run no-auth verify to confirm WCD", rr);
+                        }
 
                         SwingUtilities.invokeLater(() -> {
                             engine.model.addRow(new Object[]{rowNo, finalVName, st, finalCache, words, lines, len, title, finalRtt, finalNotes});
@@ -294,8 +363,8 @@ public class ScanEngine {
                         });
 
                         processedCount++;
-                        if (!finalNotes.isEmpty())                   interestingCount++;
-                        if (finalNotes.contains("POTENTIAL BYPASS")) bypassCount++;
+                        if (isInterestingNote(finalNotes))           interestingCount++;
+                        if (finalNotes.contains("POTENTIAL BYPASS") || wcdConfirmed) bypassCount++;
 
                         if (consecutiveResets >= wafThreshold) {
                             engine.isRunning.set(false);
@@ -337,21 +406,25 @@ public class ScanEngine {
                 if (batchPool != null) batchPool.shutdownNow();
             }
 
-            final int pc = processedCount, ic = interestingCount, bc = bypassCount;
-            SwingUtilities.invokeLater(() ->
-                    engine.progressBar.setString(String.format(
-                            "Done! ✅ %d sent | %d interesting | %d 🎯 bypasses | Re-run available", pc, ic, bc)));
+            final int pc = processedCount, ic = interestingCount, bc = bypassCount, wc = wcdConfirmedCount;
+            SwingUtilities.invokeLater(() -> {
+                engine.progressBar.setString("Done — " + pc + " sent");
+                engine.lblStatus.setText(String.format(
+                        "✅ Done — %d sent | %d findings | %d 🎯 bypass | %d 🎯 WCD cacheable | Re-run available",
+                        pc, ic, bc, wc));
+            });
 
             String targetUrl;
             try { targetUrl = baseRr.request().url().replaceAll("\\?.*", ""); } catch (Exception e) { targetUrl = "Unknown"; }
             appendScanHistory(engine.engineType, targetUrl, processedCount, interestingCount, bypassCount, finalBaseStatus);
 
-            if ("Path".equals(engine.engineType) && (wcdCachedCount > 0 || wcdPotentialCount > 0)) {
+            if ("Path".equals(engine.engineType) && (wcdCachedCount > 0 || wcdPotentialCount > 0 || wcdConfirmedCount > 0)) {
                 final int wcc = wcdCachedCount, wpc = wcdPrivateCount, wnc = wcdNoStoreCount;
-                final int wvc = wcdVaryCookieCount, wpcc = wcdPotentialCount;
+                final int wvc = wcdVaryCookieCount, wpcc = wcdPotentialCount, wconf = wcdConfirmedCount;
                 final List<String> wpv = new ArrayList<>(wcdPotentialVariants);
+                final List<String> wcv = new ArrayList<>(wcdConfirmedVariants);
                 final String tu = targetUrl;
-                SwingUtilities.invokeLater(() -> showWcdSummary(wcc, wpc, wnc, wvc, wpcc, wpv, tu));
+                SwingUtilities.invokeLater(() -> showWcdSummary(wcc, wpc, wnc, wvc, wpcc, wpv, wconf, wcv, tu));
             }
 
             // flashTab must run on EDT — it creates a Swing Timer; index reads must be on EDT too
@@ -407,10 +480,10 @@ public class ScanEngine {
         String vary          = HttpUtils.getHeaderValue(rr, "Vary");
         String age           = HttpUtils.getHeaderValue(rr, "Age");
 
-        boolean isCacheHit   = xCache.toUpperCase().contains("HIT");
-        boolean isPrivate    = cacheControl.toLowerCase().contains("private");
-        boolean isNoStore    = cacheControl.toLowerCase().contains("no-store");
-        boolean cookieInVary = vary.toLowerCase().contains("cookie");
+        boolean isCacheHit   = xCache.toUpperCase(java.util.Locale.ROOT).contains("HIT");
+        boolean isPrivate    = cacheControl.toLowerCase(java.util.Locale.ROOT).contains("private");
+        boolean isNoStore    = cacheControl.toLowerCase(java.util.Locale.ROOT).contains("no-store");
+        boolean cookieInVary = vary.toLowerCase(java.util.Locale.ROOT).contains("cookie");
 
         if (isCacheHit && !isPrivate && !isNoStore && !cookieInVary) notes.append("🎯 CACHE_HIT_CACHEABLE ");
         if (isCacheHit && cookieInVary)  notes.append("HIT_VARY_COOKIE ");
@@ -418,12 +491,42 @@ public class ScanEngine {
         if (isPrivate)  notes.append("CC:PRIVATE ");
         if (isNoStore)  notes.append("CC:NO-STORE ");
         if (cacheControl.contains("s-maxage")) notes.append("CC:S-MAXAGE ");
+        if (cacheControl.contains("max-age") && !isPrivate && !isNoStore) notes.append("CC:MAX-AGE ");
         if (!age.isEmpty()) notes.append("Age:").append(age).append(" ");
 
         HttpUtils.detectSensitiveData(bodyStr, notes);
         applyCustomRules(bodyStr, notes);
 
         return notes.toString().trim();
+    }
+
+    /**
+     * A note is "interesting" only when it flags a real finding — not baseline
+     * noise like STATUS_CHANGE / WORD_DELTA / LEN_DELTA / X-Cache:miss / CC:* .
+     */
+    public static boolean isInterestingNote(String notes) {
+        if (notes == null || notes.isEmpty()) return false;
+        return notes.contains("POTENTIAL BYPASS")
+            || notes.contains("REDIRECT BYPASS")
+            || notes.contains("PATH_CONFUSION")
+            || notes.contains("BODY_BYPASS")
+            || notes.contains("WCD CONFIRMED")
+            || notes.contains("CACHE_HIT_CACHEABLE")
+            || notes.contains("HIT_VARY_COOKIE")
+            || notes.contains("SENSITIVE_DATA")
+            || notes.contains("CUSTOM:");
+    }
+
+    /** Append a row to the WCD Findings tab (EDT-safe) and store the proving response. */
+    public void addWcdFinding(String source, String url, String authStatus, String noAuthStatus,
+                              String xCache, String verdict, HttpRequestResponse proof) {
+        int id = ctx.wcdFindingsSeq.incrementAndGet();
+        if (proof != null) ctx.wcdFindingsHistory.put(id, proof);
+        String ts = LocalDateTime.now().format(ExtensionContext.TS_FMT);
+        SwingUtilities.invokeLater(() -> {
+            if (ctx.wcdFindingsModel != null)
+                ctx.wcdFindingsModel.addRow(new Object[]{id, source, url, authStatus, noAuthStatus, xCache, verdict, ts});
+        });
     }
 
     private void applyCustomRules(String body, StringBuilder notes) {
@@ -438,53 +541,112 @@ public class ScanEngine {
     // WCD verification
     // -------------------------------------------------------------------------
 
+    /**
+     * True WCD confirmation. Works on whichever message is open (the request half
+     * of the open request/response is used). Two phases:
+     *   1) Warm — replay WITH the current auth so the sensitive response is stored
+     *      in the cache (resend until X-Cache: HIT to be sure it is cacheable).
+     *   2) Replay — resend WITHOUT cookies/auth. If it is served from cache (HIT)
+     *      and returns the same authenticated/sensitive body, it is a confirmed WCD.
+     * The outcome is always recorded in the WCD Findings tab.
+     */
     public void verifyWcdNoAuth(HttpRequestResponse originalRr) {
         ctx.taskExecutor.submit(() -> {
             try {
-                HttpRequest req = originalRr.request()
+                final HttpRequest authReq = originalRr.request();
+                final String url = safeUrl(authReq);
+
+                // ── Phase 1: warm the cache with auth ───────────────────────────
+                HttpRequestResponse warm = ctx.api.http().sendRequest(authReq);
+                int authStatus = HttpUtils.statusOf(warm);
+                String authBody = HttpUtils.bodyStr(warm);
+                String authHash = HttpUtils.bodyHash(authBody);
+                String cc   = HttpUtils.getHeaderValue(warm, "Cache-Control");
+                String warmXc = HttpUtils.getHeaderValue(warm, "X-Cache").toUpperCase(java.util.Locale.ROOT);
+                boolean isPrivate = cc.toLowerCase(java.util.Locale.ROOT).contains("private");
+                boolean isNoStore = cc.toLowerCase(java.util.Locale.ROOT).contains("no-store");
+                ctx.api.logging().logToOutput("[ACF-WCD-VERIFY] warm(auth) status=" + authStatus
+                        + " X-Cache=" + (warmXc.isEmpty() ? "(none)" : warmXc) + " url=" + url);
+                for (int i = 0; i < 3 && !warmXc.contains("HIT") && !isPrivate && !isNoStore; i++) {
+                    Thread.sleep(250);
+                    HttpRequestResponse w2 = ctx.api.http().sendRequest(authReq);
+                    warmXc = HttpUtils.getHeaderValue(w2, "X-Cache").toUpperCase(java.util.Locale.ROOT);
+                    if (warmXc.contains("HIT")) { warm = w2; authBody = HttpUtils.bodyStr(w2); authHash = HttpUtils.bodyHash(authBody); }
+                }
+
+                // ── Phase 2: replay without auth ────────────────────────────────
+                HttpRequest noAuthReq = authReq
                         .withRemovedHeader("Cookie")
                         .withRemovedHeader("Authorization")
                         .withRemovedHeader("X-Auth-Token")
                         .withRemovedHeader("X-API-Key");
-                HttpRequestResponse res = ctx.api.http().sendRequest(req);
+                HttpRequestResponse res = ctx.api.http().sendRequest(noAuthReq);
                 int st        = HttpUtils.statusOf(res);
                 String xCache = HttpUtils.getHeaderValue(res, "X-Cache");
-                String cc     = HttpUtils.getHeaderValue(res, "Cache-Control");
                 String vary   = HttpUtils.getHeaderValue(res, "Vary");
-                boolean isHit      = xCache.toUpperCase().contains("HIT");
-                boolean isPrivate  = cc.toLowerCase().contains("private");
-                boolean isNoStore  = cc.toLowerCase().contains("no-store");
-                boolean varyCookie = vary.toLowerCase().contains("cookie");
+                String noAuthBody = HttpUtils.bodyStr(res);
+                String noAuthHash = HttpUtils.bodyHash(noAuthBody);
+                boolean isHit      = xCache.toUpperCase(java.util.Locale.ROOT).contains("HIT");
+                boolean varyCookie = vary.toLowerCase(java.util.Locale.ROOT).contains("cookie");
+                boolean sameAsAuth = !authHash.isEmpty() && authHash.equals(noAuthHash);
+                StringBuilder sens = new StringBuilder();
+                HttpUtils.detectSensitiveData(noAuthBody, sens);
+                boolean leaksSensitive = sens.length() > 0 || sameAsAuth;
+                ctx.api.logging().logToOutput("[ACF-WCD-VERIFY] no-auth status=" + st
+                        + " X-Cache=" + (xCache.isEmpty() ? "(none)" : xCache)
+                        + " sameBodyAsAuth=" + sameAsAuth + " sensitive=" + (sens.length() > 0) + " url=" + url);
 
-                StringBuilder msg = new StringBuilder();
-                msg.append("URL: ").append(req.url()).append("\n");
-                msg.append("Status (No-Auth): ").append(st).append("\n");
-                msg.append("X-Cache: ").append(xCache.isEmpty() ? "(none)" : xCache).append("\n");
-                msg.append("Cache-Control: ").append(cc.isEmpty() ? "(none)" : cc).append("\n");
-                msg.append("Vary: ").append(vary.isEmpty() ? "(none)" : vary).append("\n\n");
-
-                String verdict; int msgType;
-                if (isHit && !isPrivate && !isNoStore && !varyCookie) {
-                    verdict = "✅ CONFIRMED WCD\nAuth'sız istek X-Cache: HIT döndürdü!\nBu URL cache'te mevcut ve kimlik doğrulaması olmadan erişilebilir.";
-                    msgType = JOptionPane.WARNING_MESSAGE;
-                } else if (isHit && varyCookie) {
-                    verdict = "⚠️ Cache HIT ama Vary: Cookie set\nCDN kullanıcı bazlı cache yapıyor. WCD riski düşük.";
-                    msgType = JOptionPane.INFORMATION_MESSAGE;
-                } else if (isPrivate) {
-                    verdict = "🚫 Cache-Control: private — WCD imkansız, sadece browser cache.";
+                // ── Verdict ─────────────────────────────────────────────────────
+                String shortVerdict, longVerdict; int msgType;
+                if (isPrivate) {
+                    shortVerdict = "🚫 Cache-Control: private";
+                    longVerdict  = "🚫 Cache-Control: private — WCD not possible, browser cache only.";
                     msgType = JOptionPane.INFORMATION_MESSAGE;
                 } else if (isNoStore) {
-                    verdict = "🚫 Cache-Control: no-store — WCD imkansız, cache yok.";
+                    shortVerdict = "🚫 Cache-Control: no-store";
+                    longVerdict  = "🚫 Cache-Control: no-store — WCD not possible, no caching.";
+                    msgType = JOptionPane.INFORMATION_MESSAGE;
+                } else if (isHit && leaksSensitive && !varyCookie) {
+                    shortVerdict = "✅ CONFIRMED WCD";
+                    longVerdict  = "✅ CONFIRMED WCD\nThe no-auth request was served from cache (X-Cache: HIT) and returned "
+                            + (sameAsAuth ? "the SAME body as the authenticated response" : "sensitive data")
+                            + ".\nAn unauthenticated attacker can retrieve this cached authenticated content.";
+                    msgType = JOptionPane.WARNING_MESSAGE;
+                } else if (isHit && varyCookie) {
+                    shortVerdict = "⚠️ HIT but Vary: Cookie";
+                    longVerdict  = "⚠️ Cache HIT but Vary: Cookie is set\nThe cache keys on the cookie (per-user). WCD risk is low.";
+                    msgType = JOptionPane.INFORMATION_MESSAGE;
+                } else if (isHit) {
+                    shortVerdict = "⚠️ HIT but content differs";
+                    longVerdict  = "⚠️ Served from cache (HIT) but the no-auth body differs from the authenticated one "
+                            + "(likely a public/login page). Not a confirmed leak.";
                     msgType = JOptionPane.INFORMATION_MESSAGE;
                 } else {
-                    verdict = "❌ Cache MISS (veya X-Cache header yok)\nBu URL WCD için cache'lenmedi.";
+                    shortVerdict = "❌ Not cached without auth";
+                    longVerdict  = "❌ The no-auth replay was NOT served from cache (status " + st + ", X-Cache: "
+                            + (xCache.isEmpty() ? "none" : xCache) + ").\nThis URL is not exploitable via WCD as tested.";
                     msgType = JOptionPane.INFORMATION_MESSAGE;
                 }
-                msg.append("Sonuç: ").append(verdict);
+
+                addWcdFinding("Manual verify", url, String.valueOf(authStatus), String.valueOf(st),
+                        xCache.isEmpty() ? "(none)" : xCache, shortVerdict, res);
+
+                StringBuilder msg = new StringBuilder();
+                msg.append("URL: ").append(url).append("\n");
+                msg.append("Warm (with auth) status: ").append(authStatus)
+                        .append("  X-Cache: ").append(warmXc.isEmpty() ? "(none)" : warmXc).append("\n");
+                msg.append("Replay (no auth) status: ").append(st)
+                        .append("  X-Cache: ").append(xCache.isEmpty() ? "(none)" : xCache).append("\n");
+                msg.append("Cache-Control: ").append(cc.isEmpty() ? "(none)" : cc).append("\n");
+                msg.append("Vary: ").append(vary.isEmpty() ? "(none)" : vary).append("\n");
+                msg.append("No-auth body == auth body: ").append(sameAsAuth ? "yes" : "no");
+                if (sens.length() > 0) msg.append("   Sensitive: ").append(sens.toString().trim());
+                msg.append("\n\nResult: ").append(longVerdict);
+                msg.append("\n\n→ Added to the 'WCD Findings' tab (double-click the row to view the no-auth response).");
                 final String finalMsg = msg.toString();
                 final int finalType = msgType;
                 SwingUtilities.invokeLater(() ->
-                        JOptionPane.showMessageDialog(ctx.mainTabs, finalMsg, "WCD Doğrulama", finalType));
+                        JOptionPane.showMessageDialog(ctx.mainTabs, finalMsg, "WCD Verification", finalType));
             } catch (Exception ex) {
                 ctx.api.logging().logToError("[ACF] WCD verify error: " + ex.getMessage());
             }
@@ -492,23 +654,27 @@ public class ScanEngine {
     }
 
     private void showWcdSummary(int cached, int priv, int noStore, int varyCookie,
-                                int potential, List<String> variants, String targetUrl) {
-        if (cached == 0 && potential == 0) return;
+                                int potential, List<String> variants,
+                                int confirmed, List<String> confirmedVariants, String targetUrl) {
+        if (cached == 0 && potential == 0 && confirmed == 0) return;
         StringBuilder msg = new StringBuilder();
         msg.append("WCD SCAN SUMMARY\n");
         msg.append("Target: ").append(targetUrl).append("\n");
         msg.append("─".repeat(48)).append("\n");
-        msg.append(String.format("Cached Responses (X-Cache: HIT):     %d%n", cached));
-        msg.append(String.format("Cache-Control: private:               %d  ← WCD imkansız%n", priv));
-        msg.append(String.format("Cache-Control: no-store:              %d  ← WCD imkansız%n", noStore));
-        msg.append(String.format("Vary: Cookie set:                     %d  ← WCD riski düşük%n", varyCookie));
-        msg.append(String.format("Potential WCD (HIT, no Vary:Cookie):  %d%n", potential));
-        if (!variants.isEmpty()) {
-            msg.append("\n🎯 Doğrulanması gereken varyantlar:\n");
-            for (String v : variants) msg.append("  └→ ").append(v).append("\n");
-            msg.append("\nSağ tık → 'Verify WCD (No-Auth)' ile doğrulayın.");
+        if (confirmed > 0) {
+            msg.append("🎯 Cacheable MISS→HIT (added to WCD Findings tab):\n");
+            for (String v : confirmedVariants) msg.append("  🎯 ").append(v).append("\n");
+            msg.append("─".repeat(48)).append("\n");
         }
-        int msgType = potential > 0 ? JOptionPane.WARNING_MESSAGE : JOptionPane.INFORMATION_MESSAGE;
+        msg.append(String.format("Cached Responses (X-Cache: HIT):     %d%n", cached));
+        msg.append(String.format("Confirmed MISS→HIT (resend):          %d%n", confirmed));
+        msg.append(String.format("Cache-Control: private:               %d  ← WCD not possible%n", priv));
+        msg.append(String.format("Cache-Control: no-store:              %d  ← WCD not possible%n", noStore));
+        msg.append(String.format("Vary: Cookie set:                     %d  ← WCD risk low%n", varyCookie));
+        msg.append(String.format("Potential WCD (HIT, no Vary:Cookie):  %d%n", potential));
+        msg.append("\nNext step: right-click the cacheable request → 'Verify WCD (warm + no-auth replay)'\n"
+                + "to confirm an unauthenticated attacker gets the cached content. See the 'WCD Findings' tab.");
+        int msgType = (confirmed > 0 || potential > 0) ? JOptionPane.WARNING_MESSAGE : JOptionPane.INFORMATION_MESSAGE;
         JOptionPane.showMessageDialog(ctx.mainTabs, msg.toString(), "WCD Scan Summary", msgType);
     }
 
@@ -531,15 +697,13 @@ public class ScanEngine {
         }
         HttpRequestResponse rr = engine.lastRequest;
         List<Variant> variants;
-        int delay;
+        int delay = (int) ctx.spinDelay.getValue();
         switch (engine.engineType) {
             case "Header":
                 variants = new HeaderPayloadBuilder(ctx).build(rr.request());
-                delay = (int) ctx.spinHeaderDelay.getValue();
                 break;
             case "Path":
                 variants = new PathPayloadBuilder(ctx).build(rr.request());
-                delay = (int) ctx.spinPathDelay.getValue();
                 break;
             case "Selection":
                 if (engine.lastSelectionRange == null) {
@@ -549,7 +713,6 @@ public class ScanEngine {
                 }
                 variants = new SelectionPayloadBuilder(ctx).build(rr.request(),
                         engine.lastSelectionRange[0], engine.lastSelectionRange[1]);
-                delay = (int) ctx.spinSelDelay.getValue();
                 break;
             default: return;
         }

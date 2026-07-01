@@ -9,7 +9,7 @@ import java.util.concurrent.ExecutorService;
 
 public class ExtensionContext {
 
-    public static final String VERSION = "2.3.2";
+    public static final String VERSION = "2.4.0";
     public static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     public final MontoyaApi api;
@@ -19,13 +19,15 @@ public class ExtensionContext {
     // Engines
     public FuzzerEngine headerEngine, pathEngine, selectionEngine;
 
+    // OPSEC & Network (shared, lives in Settings)
+    public JSpinner spinDelay;
+    public JLabel lblCurrentIp;
+
     // Header controls
-    public JSpinner spinHeaderDelay;
     public JCheckBox chkHeaderIP, chkHeaderMethod, chkHeaderRewrite;
     public JTextArea txtHeaderIPs, txtHeaderHeaders;
 
     // Path controls
-    public JSpinner spinPathDelay;
     public JCheckBox chkPathRewrite, chkPathNorm, chkPathAdvanced;
     public JCheckBox chkPathDelimiter, chkPathDelimExt, chkPathNormDisc, chkPathCacheCombo, chkPathFatGet;
     public JTextField txtDelimSuffix, txtCachePrefix;
@@ -33,12 +35,8 @@ public class ExtensionContext {
     public JComboBox<String> cmbCdnProfile;
 
     // Selection controls
-    public JSpinner spinSelDelay;
     public JCheckBox chkSelUrl, chkSelDoubleUrl, chkSelIis, chkSelUtf;
     public JTextArea txtSelCustom;
-
-    // OPSEC labels
-    public JLabel lblCurrentIpHeader, lblCurrentIpPath, lblCurrentIpSel;
 
     // Global settings
     public JSpinner spinWafThreshold, spinParallelThreads;
@@ -47,6 +45,12 @@ public class ExtensionContext {
 
     // History model
     public DefaultTableModel historyModel;
+
+    // WCD Findings tab
+    public DefaultTableModel wcdFindingsModel;
+    public final java.util.Map<Integer, burp.api.montoya.http.message.HttpRequestResponse> wcdFindingsHistory
+            = new java.util.concurrent.ConcurrentHashMap<>();
+    public final java.util.concurrent.atomic.AtomicInteger wcdFindingsSeq = new java.util.concurrent.atomic.AtomicInteger(0);
 
     public ExtensionContext(MontoyaApi api, JTabbedPane mainTabs, ExecutorService taskExecutor) {
         this.api = api;

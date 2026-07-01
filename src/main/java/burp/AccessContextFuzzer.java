@@ -18,6 +18,7 @@ import burp.ui.HeaderEngineTab;
 import burp.ui.PathEngineTab;
 import burp.ui.SelectionEngineTab;
 import burp.ui.SettingsTab;
+import burp.ui.WcdFindingsTab;
 
 import javax.swing.*;
 import java.awt.*;
@@ -37,6 +38,7 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         scanEngine = new ScanEngine(ctx);
 
         api.extension().setName("Access Context Fuzzer");
+        api.logging().logToOutput("[ACF] v2.4.0 loaded — WCD verify (warm+replay) + WCD Findings tab active");
         api.extension().registerUnloadingHandler(() -> {
             SettingsTab.save(ctx);
             ctx.taskExecutor.shutdownNow();
@@ -45,12 +47,14 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         JPanel headerPanel    = HeaderEngineTab.build(ctx, scanEngine);
         JPanel pathPanel      = PathEngineTab.build(ctx, scanEngine);
         JPanel selectionPanel = SelectionEngineTab.build(ctx, scanEngine);
-        JPanel settingsPanel  = SettingsTab.build(ctx);
+        JPanel settingsPanel  = SettingsTab.build(ctx, scanEngine);
+        JPanel wcdPanel       = WcdFindingsTab.build(ctx);
         JPanel aboutPanel     = AboutTab.build(ctx);
 
         mainTabs.addTab("🔐 Header Bypass",        headerPanel);
         mainTabs.addTab("🔀 Path / GET Bypass",    pathPanel);
         mainTabs.addTab("🎯 Selection Fuzz",       selectionPanel);
+        mainTabs.addTab("🎯 WCD Findings",         wcdPanel);
         mainTabs.addTab("⚙ Settings & History",   settingsPanel);
         mainTabs.addTab("ℹ About",                aboutPanel);
 
@@ -75,9 +79,10 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         if (targetReq == null) return menuItems;
         final HttpRequestResponse finalReq = targetReq;
 
-        JMenuItem verifyWcd = new JMenuItem("Access Context: Verify WCD (No-Auth)");
-        verifyWcd.setToolTipText("Replay this URL without cookies or auth headers — if the cached response still " +
-                "returns authenticated content, it's a confirmed Web Cache Deception finding.");
+        JMenuItem verifyWcd = new JMenuItem("Access Context: Verify WCD (warm + no-auth replay)");
+        verifyWcd.setToolTipText("Works on whichever message is open (request or response). Warms the cache with your " +
+                "auth first, then replays without cookies/auth — if the no-auth response is served from cache with the " +
+                "authenticated content, it's a confirmed Web Cache Deception finding. Result is added to the WCD Findings tab.");
         verifyWcd.addActionListener(e -> scanEngine.verifyWcdNoAuth(finalReq));
         menuItems.add(verifyWcd);
 
@@ -86,13 +91,13 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                 "(X-Forwarded-For, X-Real-IP…), host override, HTTP method tampering, and custom headers.");
         runHeader.addActionListener(e -> {
             if (ctx.headerEngine.isRunning.get()) return;
-            if (!scanEngine.confirmOpsec(ctx.lblCurrentIpHeader)) return;
+            if (!scanEngine.confirmOpsec(ctx.lblCurrentIp)) return;
             ctx.mainTabs.setSelectedIndex(0);
             scanEngine.focusSuiteTab();
             scanEngine.flashTab(0, "🔐 Header Bypass");
             // Build variants and read spinner on EDT before submitting to background thread
             List<Variant> variants = new HeaderPayloadBuilder(ctx).build(finalReq.request());
-            int delay = (int) ctx.spinHeaderDelay.getValue();
+            int delay = (int) ctx.spinDelay.getValue();
             ScanEngine.ScanConfig cfg = new ScanEngine.ScanConfig(ctx);
             ctx.taskExecutor.submit(() -> scanEngine.startFuzzing(finalReq, ctx.headerEngine, variants, delay, cfg));
         });
@@ -103,12 +108,12 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                 "Deception pipeline (delimiter discovery, extension combos, normalization discrepancy, exploit payloads).");
         runPath.addActionListener(e -> {
             if (ctx.pathEngine.isRunning.get()) return;
-            if (!scanEngine.confirmOpsec(ctx.lblCurrentIpPath)) return;
+            if (!scanEngine.confirmOpsec(ctx.lblCurrentIp)) return;
             ctx.mainTabs.setSelectedIndex(1);
             scanEngine.focusSuiteTab();
             scanEngine.flashTab(1, "🔀 Path / GET Bypass");
             List<Variant> variants = new PathPayloadBuilder(ctx).build(finalReq.request());
-            int delay = (int) ctx.spinPathDelay.getValue();
+            int delay = (int) ctx.spinDelay.getValue();
             ScanEngine.ScanConfig cfg = new ScanEngine.ScanConfig(ctx);
             ctx.taskExecutor.submit(() -> scanEngine.startFuzzing(finalReq, ctx.pathEngine, variants, delay, cfg));
         });
@@ -124,12 +129,12 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
                         "UTF-8 fullwidth slash, and custom payloads — without modifying the rest of the request.");
                 runSel.addActionListener(e -> {
                     if (ctx.selectionEngine.isRunning.get()) return;
-                    if (!scanEngine.confirmOpsec(ctx.lblCurrentIpSel)) return;
+                    if (!scanEngine.confirmOpsec(ctx.lblCurrentIp)) return;
                     ctx.mainTabs.setSelectedIndex(2);
                     scanEngine.focusSuiteTab();
                     scanEngine.flashTab(2, "🎯 Selection Fuzz");
                     List<Variant> variants = new SelectionPayloadBuilder(ctx).build(finalReq.request(), start, end);
-                    int delay = (int) ctx.spinSelDelay.getValue();
+                    int delay = (int) ctx.spinDelay.getValue();
                     ScanEngine.ScanConfig cfg = new ScanEngine.ScanConfig(ctx);
                     ctx.taskExecutor.submit(() -> {
                         ctx.selectionEngine.lastSelectionRange = new int[]{start, end};
