@@ -21,10 +21,6 @@ public class SelectionEngineTab {
         settingsPanel.setLayout(new BoxLayout(settingsPanel, BoxLayout.Y_AXIS));
         settingsPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        ctx.lblCurrentIpSel = new JLabel(" Status: Not checked.");
-        ctx.spinSelDelay = new JSpinner(new SpinnerNumberModel(20, 0, 60000, 10));
-        settingsPanel.add(ResultsPanel.buildOpsecPanel(ctx, ctx.lblCurrentIpSel, ctx.spinSelDelay, scanEngine));
-
         JPanel togglePanel = new JPanel(new GridLayout(2, 2, 5, 5));
         togglePanel.setBorder(BorderFactory.createTitledBorder("Selected Text Encoders"));
         ctx.chkSelUrl = new JCheckBox("URL Encode", true);

@@ -21,10 +21,6 @@ public class HeaderEngineTab {
         settingsPanel.setLayout(new BoxLayout(settingsPanel, BoxLayout.Y_AXIS));
         settingsPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        ctx.lblCurrentIpHeader = new JLabel(" Status: Not checked.");
-        ctx.spinHeaderDelay = new JSpinner(new SpinnerNumberModel(20, 0, 60000, 10));
-        settingsPanel.add(ResultsPanel.buildOpsecPanel(ctx, ctx.lblCurrentIpHeader, ctx.spinHeaderDelay, scanEngine));
-
         JPanel togglePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         togglePanel.setBorder(BorderFactory.createTitledBorder("Built-in Payloads"));
         ctx.chkHeaderIP = new JCheckBox("Enable IP/Host Spoofing", true);

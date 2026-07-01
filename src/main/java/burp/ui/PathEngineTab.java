@@ -21,10 +21,6 @@ public class PathEngineTab {
         settingsPanel.setLayout(new BoxLayout(settingsPanel, BoxLayout.Y_AXIS));
         settingsPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        ctx.lblCurrentIpPath = new JLabel(" Status: Not checked.");
-        ctx.spinPathDelay = new JSpinner(new SpinnerNumberModel(20, 0, 60000, 10));
-        settingsPanel.add(ResultsPanel.buildOpsecPanel(ctx, ctx.lblCurrentIpPath, ctx.spinPathDelay, scanEngine));
-
         JPanel togglePanel = new JPanel(new GridLayout(2, 4, 5, 5));
         togglePanel.setBorder(BorderFactory.createTitledBorder("Built-in Payloads"));
         ctx.chkPathRewrite = new JCheckBox("Rewrite Tricks", true);

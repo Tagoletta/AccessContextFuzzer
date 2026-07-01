@@ -1,6 +1,7 @@
 package burp.ui;
 
 import burp.core.ExtensionContext;
+import burp.core.ScanEngine;
 
 import burp.util.ThemeColors;
 
@@ -12,9 +13,17 @@ public class SettingsTab {
 
     private SettingsTab() {}
 
-    public static JPanel build(ExtensionContext ctx) {
+    public static JPanel build(ExtensionContext ctx, ScanEngine scanEngine) {
         JPanel panel = new JPanel(new BorderLayout(0, 8));
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // OPSEC & Network — shared across all engines, persisted below
+        ctx.lblCurrentIp = new JLabel(" Status: Not checked.");
+        ctx.spinDelay = new JSpinner(new SpinnerNumberModel(20, 0, 60000, 10));
+        JPanel opsecWrap = new JPanel(new BorderLayout());
+        opsecWrap.add(ResultsPanel.buildOpsecPanel(ctx, ctx.lblCurrentIp, ctx.spinDelay, scanEngine), BorderLayout.WEST);
+
+        JPanel topWrap = new JPanel(new BorderLayout(0, 8));
 
         JPanel topPanel = new JPanel(new GridLayout(1, 2, 8, 0));
         topPanel.setPreferredSize(new Dimension(800, 180));
@@ -72,7 +81,9 @@ public class SettingsTab {
         rulesPanel.add(new JScrollPane(ctx.txtDetectRules), BorderLayout.CENTER);
         topPanel.add(rulesPanel);
 
-        panel.add(topPanel, BorderLayout.NORTH);
+        topWrap.add(opsecWrap, BorderLayout.NORTH);
+        topWrap.add(topPanel, BorderLayout.CENTER);
+        panel.add(topWrap, BorderLayout.NORTH);
 
         // Scan History
         JPanel historyPanel = new JPanel(new BorderLayout(0, 3));
@@ -107,9 +118,9 @@ public class SettingsTab {
         try {
             burp.api.montoya.persistence.Preferences prefs = ctx.api.persistence().preferences();
 
-            Integer hd = prefs.getInteger("acf.hdr.delay");   if (hd != null) ctx.spinHeaderDelay.setValue(hd);
-            Integer pd = prefs.getInteger("acf.path.delay");  if (pd != null) ctx.spinPathDelay.setValue(pd);
-            Integer sd = prefs.getInteger("acf.sel.delay");   if (sd != null) ctx.spinSelDelay.setValue(sd);
+            Integer dl = prefs.getInteger("acf.delay");
+            if (dl == null) dl = prefs.getInteger("acf.path.delay");   // migrate legacy per-engine key
+            if (dl != null) ctx.spinDelay.setValue(dl);
 
             Boolean v;
             v = prefs.getBoolean("acf.hdr.ip");         if (v != null) ctx.chkHeaderIP.setSelected(v);
@@ -155,9 +166,7 @@ public class SettingsTab {
         try {
             burp.api.montoya.persistence.Preferences prefs = ctx.api.persistence().preferences();
 
-            prefs.setInteger("acf.hdr.delay",  (int) ctx.spinHeaderDelay.getValue());
-            prefs.setInteger("acf.path.delay", (int) ctx.spinPathDelay.getValue());
-            prefs.setInteger("acf.sel.delay",  (int) ctx.spinSelDelay.getValue());
+            prefs.setInteger("acf.delay", (int) ctx.spinDelay.getValue());
 
             prefs.setBoolean("acf.hdr.ip",      ctx.chkHeaderIP.isSelected());
             prefs.setBoolean("acf.hdr.method",  ctx.chkHeaderMethod.isSelected());
