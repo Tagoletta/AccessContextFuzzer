@@ -18,7 +18,8 @@
   <a href="#usage">Usage</a> •
   <a href="#web-cache-deception">Web Cache Deception</a> •
   <a href="#building-from-source">Build</a> •
-  <a href="#contributing">Contributing</a>
+  <a href="#contributing">Contributing</a> •
+  <a href="#sponsor">Sponsor</a>
 </p>
 
 <p align="center">
@@ -27,6 +28,7 @@
   <img src="https://img.shields.io/badge/API-Montoya-green?style=for-the-badge" alt="Montoya API"/>
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License"/>
   <a href="https://github.com/Tagoletta/AccessContextFuzzer/releases/latest"><img src="https://img.shields.io/github/v/release/Tagoletta/AccessContextFuzzer?style=for-the-badge&label=Download&color=brightgreen" alt="Download Latest"/></a>
+  <a href="https://github.com/sponsors/Tagoletta"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor"/></a>
 </p>
 
 ---
@@ -717,6 +719,26 @@ Contributions are welcome! Here's how to get started:
 - [ ] Auto-detect interesting responses using ML heuristics
 - [ ] WCD two-phase verification (automated attacker re-request to confirm cached content)
 - [ ] Persistent scan history across Burp restarts (serialize to file)
+
+---
+
+<a id="sponsor"></a>
+
+## ❤️ Sponsor
+
+Access Context Fuzzer is free and open source, built and maintained in my own time. If it saves you effort on an engagement, finds you a bug, or you simply want to see it keep improving, please consider sponsoring its development.
+
+<p align="center">
+  <a href="https://github.com/sponsors/Tagoletta"><img src="https://img.shields.io/badge/Sponsor_on_GitHub-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub"/></a>
+</p>
+
+Your support directly funds:
+
+- 🧪 New bypass techniques and WCD detection modules
+- 🐛 Faster bug fixes and Burp API compatibility updates
+- 📖 Write-ups and documentation for the security community
+
+You can also support the project for free by **starring the repo ⭐**, reporting bugs, or sharing it with fellow testers. Thank you! 🙏
 
 ---
 
