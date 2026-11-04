@@ -1,6 +1,8 @@
 package burp.ui;
 
+import burp.api.montoya.http.message.HttpHeader;
 import burp.api.montoya.http.message.HttpRequestResponse;
+import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.ui.editor.EditorOptions;
 import burp.api.montoya.ui.editor.HttpRequestEditor;
 import burp.api.montoya.ui.editor.HttpResponseEditor;
@@ -47,6 +49,9 @@ public class ResultsPanel {
 
         engine.btnExport = new JButton("Export CSV");
 
+        JButton btnReport = new JButton("📄 HTML Report");
+        btnReport.setToolTipText("Export all results to a self-contained HTML report (interesting rows highlighted).");
+
         engine.btnRerun = new JButton("▶ Re-run Fuzzing");
         engine.btnRerun.setEnabled(false);
         engine.btnRerun.setBackground(ThemeColors.btnRerun());
@@ -65,6 +70,7 @@ public class ResultsPanel {
         controlPanel.add(engine.btnFilter);
         controlPanel.add(engine.btnPreview);
         controlPanel.add(engine.btnExport);
+        controlPanel.add(btnReport);
 
         JPanel statusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
         statusPanel.add(engine.lblStatus);
@@ -98,6 +104,7 @@ public class ResultsPanel {
 
         engine.btnStop.addActionListener(e -> scanEngine.stopEngine(engine));
         engine.btnExport.addActionListener(e -> exportToCsv(engine.model, name));
+        btnReport.addActionListener(e -> exportHtmlReport(engine.model, name));
         engine.btnRerun.addActionListener(e -> scanEngine.rerunFuzzing(engine));
         engine.btnFilter.addActionListener(e -> toggleInterestingFilter(engine));
         engine.btnPreview.addActionListener(e -> scanEngine.showPayloadPreview(engine));
@@ -111,12 +118,14 @@ public class ResultsPanel {
         JMenuItem sendToRepeaterItem  = new JMenuItem("Send to Repeater");
         JMenuItem sendAllSelectedItem = new JMenuItem("Send All Selected to Repeater");
         JMenuItem sendInterestingItem = new JMenuItem("Send All Interesting to Repeater");
+        JMenuItem copyCurlItem        = new JMenuItem("Copy as curl");
         JMenuItem compareBaselineItem = new JMenuItem("Compare with Baseline");
 
         popupMenu.add(sendToRepeaterItem);
         popupMenu.add(sendAllSelectedItem);
         popupMenu.addSeparator();
         popupMenu.add(sendInterestingItem);
+        popupMenu.add(copyCurlItem);
         popupMenu.addSeparator();
         popupMenu.add(compareBaselineItem);
 
@@ -204,6 +213,20 @@ public class ResultsPanel {
             else
                 JOptionPane.showMessageDialog(null, "No interesting results found.",
                         "Sent to Repeater", JOptionPane.INFORMATION_MESSAGE);
+        });
+
+        copyCurlItem.addActionListener(e -> {
+            int selectedRow = engine.table.getSelectedRow();
+            if (selectedRow == -1) return;
+            int modelRow = engine.table.convertRowIndexToModel(selectedRow);
+            int reqId = (int) engine.model.getValueAt(modelRow, 0);
+            HttpRequestResponse rrData = engine.requestHistory.get(reqId);
+            if (rrData == null) return;
+            String curl = toCurl(rrData);
+            java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                    .setContents(new java.awt.datatransfer.StringSelection(curl), null);
+            JOptionPane.showMessageDialog(null, "curl command copied to clipboard.",
+                    "Copy as curl", JOptionPane.INFORMATION_MESSAGE);
         });
 
         compareBaselineItem.addActionListener(e -> {
@@ -340,6 +363,93 @@ public class ResultsPanel {
         }
     }
 
+    /** Build a copy-pasteable curl command for a captured request. */
+    static String toCurl(HttpRequestResponse rr) {
+        HttpRequest req = rr.request();
+        StringBuilder sb = new StringBuilder("curl -k -i");
+        String method = req.method();
+        if (method != null && !"GET".equalsIgnoreCase(method)) sb.append(" -X ").append(method);
+        try {
+            for (HttpHeader h : req.headers()) {
+                if (h == null || h.name() == null) continue;
+                String n = h.name();
+                if (n.startsWith(":")) continue;                       // HTTP/2 pseudo-headers
+                if (n.equalsIgnoreCase("Content-Length")) continue;    // curl sets it
+                sb.append(" -H ").append(shellQuote(n + ": " + (h.value() == null ? "" : h.value())));
+            }
+        } catch (Exception ignored) {}
+        try {
+            String body = req.bodyToString();
+            if (body != null && !body.isEmpty()) sb.append(" --data-raw ").append(shellQuote(body));
+        } catch (Exception ignored) {}
+        String url;
+        try { url = req.url(); } catch (Exception e) { url = req.path(); }
+        sb.append(' ').append(shellQuote(url));
+        return sb.toString();
+    }
+
+    private static String shellQuote(String s) {
+        if (s == null) return "''";
+        return "'" + s.replace("'", "'\\''") + "'";
+    }
+
+    /** Export all results to a self-contained HTML report, interesting rows highlighted. */
+    private static void exportHtmlReport(DefaultTableModel m, String engineName) {
+        if (m.getRowCount() == 0) return;
+        JFileChooser f = new JFileChooser();
+        f.setSelectedFile(new File("acf-report-" + engineName.replaceAll("[^A-Za-z0-9]", "_") + ".html"));
+        if (f.showSaveDialog(null) != JFileChooser.APPROVE_OPTION) return;
+        File file = f.getSelectedFile();
+        if (!file.getName().toLowerCase().endsWith(".html"))
+            file = new File(file.getParentFile(), file.getName() + ".html");
+        int interesting = 0;
+        for (int r = 0; r < m.getRowCount(); r++)
+            if (ScanEngine.isInterestingNote(str(m.getValueAt(r, 9)))) interesting++;
+        try (PrintWriter pw = new PrintWriter(file, "UTF-8")) {
+            pw.println("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\">");
+            pw.println("<title>Access Context Fuzzer — " + esc(engineName) + " Report</title><style>");
+            pw.println("body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:24px;color:#1a1a1a}"
+                    + "h1{font-size:20px}.meta{color:#666;font-size:13px;margin-bottom:16px}"
+                    + "table{border-collapse:collapse;width:100%;font-size:13px}"
+                    + "th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top}"
+                    + "th{background:#f3f4f6;position:sticky;top:0}"
+                    + "tr.hit{background:#fff4e5}tr.sens{background:#fde7f3}tr.fp{color:#999}"
+                    + ".notes{font-family:monospace;font-size:12px}");
+            pw.println("</style></head><body>");
+            pw.println("<h1>Access Context Fuzzer — " + esc(engineName) + " Report</h1>");
+            pw.println("<div class=\"meta\">Generated " + esc(java.time.LocalDateTime.now().toString())
+                    + " &middot; " + m.getRowCount() + " rows &middot; " + interesting + " interesting</div>");
+            pw.println("<table><thead><tr>");
+            for (int c = 0; c < m.getColumnCount(); c++) pw.print("<th>" + esc(m.getColumnName(c)) + "</th>");
+            pw.println("</tr></thead><tbody>");
+            for (int r = 0; r < m.getRowCount(); r++) {
+                String notes = str(m.getValueAt(r, 9));
+                String cls = "";
+                if (notes.contains("SENSITIVE_DATA")) cls = " class=\"sens\"";
+                else if (notes.contains("LIKELY_FALSE_POSITIVE")) cls = " class=\"fp\"";
+                else if (ScanEngine.isInterestingNote(notes)) cls = " class=\"hit\"";
+                pw.print("<tr" + cls + ">");
+                for (int c = 0; c < m.getColumnCount(); c++) {
+                    String v = esc(str(m.getValueAt(r, c)));
+                    pw.print(c == 9 ? "<td class=\"notes\">" + v + "</td>" : "<td>" + v + "</td>");
+                }
+                pw.println("</tr>");
+            }
+            pw.println("</tbody></table></body></html>");
+            JOptionPane.showMessageDialog(null, "HTML report saved:\n" + file.getAbsolutePath(),
+                    "HTML Report", JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(null, "Report export failed: " + ex.getMessage(),
+                    "Report Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private static String str(Object o) { return o == null ? "" : o.toString(); }
+
+    private static String esc(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
     private static void exportToCsv(DefaultTableModel m, String n) {
         if (m.getRowCount() == 0) return;
         JFileChooser f = new JFileChooser();
@@ -348,6 +458,7 @@ public class ResultsPanel {
             if (!file.getName().toLowerCase().endsWith(".csv"))
                 file = new File(file.getParentFile(), file.getName() + ".csv");
             try (PrintWriter pw = new PrintWriter(file, "UTF-8")) {
+                pw.print('﻿'); // UTF-8 BOM so Excel renders Turkish characters correctly
                 for (int i = 0; i < m.getColumnCount(); i++)
                     pw.print("\"" + m.getColumnName(i) + "\"" + (i == m.getColumnCount() - 1 ? "" : ","));
                 pw.println();

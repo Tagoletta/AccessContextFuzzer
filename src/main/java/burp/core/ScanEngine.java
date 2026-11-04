@@ -94,6 +94,43 @@ public class ScanEngine {
         }
     }
 
+    /**
+     * Calibration oracle used to score access-control bypass candidates and to
+     * damp noise on unstable targets. Built once per scan from a few baseline
+     * samples plus a request to a guaranteed-nonexistent sibling path.
+     */
+    public static final class Oracle {
+        public final boolean baselineStable;   // baseline returned a consistent status across samples
+        public final int catchAllStatus;       // status of a definitely-nonexistent path
+        public final int catchAllLen;
+        public final String catchAllHash;      // normalized body hash of the catch-all response
+
+        public Oracle(boolean baselineStable, int catchAllStatus, int catchAllLen, String catchAllHash) {
+            this.baselineStable = baselineStable;
+            this.catchAllStatus = catchAllStatus;
+            this.catchAllLen = catchAllLen;
+            this.catchAllHash = catchAllHash == null ? "" : catchAllHash;
+        }
+
+        public static Oracle disabled() { return new Oracle(true, -1, -1, ""); }
+
+        /** True if the server appears to answer 2xx for everything (soft-404 / SPA catch-all). */
+        public boolean catchAllIs2xx() { return catchAllStatus >= 200 && catchAllStatus < 300; }
+    }
+
+    /** Remove variants that produce a byte-identical HTTP request, preserving order. */
+    static List<Variant> dedupeVariants(List<Variant> variants) {
+        List<Variant> out = new ArrayList<>(variants.size());
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (Variant v : variants) {
+            String sig;
+            try { sig = v.request.toByteArray().toString(); }
+            catch (Exception e) { sig = v.name + "@" + System.identityHashCode(v.request); }
+            if (seen.add(sig)) out.add(v);
+        }
+        return out;
+    }
+
     /** Carries the (possibly upgraded) result plus whether a MISS→HIT was confirmed. */
     private static final class WcdCheck {
         final FuzzResult fr;
@@ -132,6 +169,37 @@ public class ScanEngine {
         return new WcdCheck(fr, false);
     }
 
+    /**
+     * Build the calibration {@link Oracle}: one extra baseline sample to detect an
+     * unstable target, plus a request to a guaranteed-nonexistent sibling path to
+     * detect soft-404 / catch-all 2xx behaviour.
+     */
+    private Oracle buildOracle(HttpRequest baseReq, int firstStatus) {
+        boolean stable = true;
+        try {
+            int s = HttpUtils.statusOf(ctx.api.http().sendRequest(baseReq));
+            if (s != -1 && s != firstStatus) stable = false;
+        } catch (Exception ignored) {}
+
+        int caStatus = -1, caLen = -1; String caHash = "";
+        try {
+            String path     = baseReq.path();
+            String pathOnly = path.contains("?") ? path.substring(0, path.indexOf('?')) : path;
+            String query    = path.contains("?") ? path.substring(path.indexOf('?')) : "";
+            String rnd      = "acf" + Long.toHexString(System.nanoTime()) + "zz404";
+            String probe    = (pathOnly.endsWith("/") ? pathOnly : pathOnly + "/") + rnd + query;
+            HttpRequestResponse ca = ctx.api.http().sendRequest(baseReq.withPath(probe));
+            caStatus = HttpUtils.statusOf(ca);
+            caLen    = HttpUtils.bodyLen(ca);
+            caHash   = HttpUtils.bodyHash(HttpUtils.bodyStr(ca));
+            ctx.api.logging().logToOutput("[ACF-ORACLE] baselineStable=" + stable
+                    + " catchAllStatus=" + caStatus + " path=" + probe);
+        } catch (Exception e) {
+            ctx.api.logging().logToError("[ACF] Oracle probe error: " + e.getMessage());
+        }
+        return new Oracle(stable, caStatus, caLen, caHash);
+    }
+
     public void startFuzzing(HttpRequestResponse baseRr, FuzzerEngine engine,
                               List<Variant> variants, int delayMs, ScanConfig config) {
         engine.lastRequest = baseRr;
@@ -168,6 +236,14 @@ public class ScanEngine {
             HttpRequest baseReq = baseRr.request();
             engine.requestHistory.clear();
 
+            // Drop byte-identical duplicate variants before scanning.
+            int rawVariantCount = variants.size();
+            variants = dedupeVariants(variants);
+            int deduped = rawVariantCount - variants.size();
+            if (deduped > 0)
+                ctx.api.logging().logToOutput("[ACF] Deduped " + deduped + " duplicate variant(s); "
+                        + variants.size() + " unique.");
+
             HttpRequestResponse baseline = ctx.api.http().sendRequest(baseReq);
             int baseStatus    = HttpUtils.statusOf(baseline);
             int baseLen       = HttpUtils.bodyLen(baseline);
@@ -179,9 +255,18 @@ public class ScanEngine {
             engine.baselineStatus = baseStatus;
             finalBaseStatus = baseStatus;
 
+            // Calibration: confirm the baseline is stable and probe catch-all behaviour.
+            final Oracle oracle = buildOracle(baseReq, baseStatus);
+            String baselineNote = "Original";
+            if (!oracle.baselineStable)
+                baselineNote = "⚠️ UNSTABLE_BASELINE (status varied across samples)";
+            else if (oracle.catchAllIs2xx())
+                baselineNote = "⚠️ CATCH-ALL 2xx (server answers 2xx for unknown paths; bypass 2xx is weak signal)";
+            final String finalBaselineNote = baselineNote;
+
             final String cacheBase = HttpUtils.computeCacheStatus(baseline);
             SwingUtilities.invokeLater(() -> engine.model.addRow(new Object[]{
-                    0, "BASELINE", baseStatus, cacheBase, baseWords, baseLines, baseLen, baseTitle, 0, "Original"}));
+                    0, "BASELINE", baseStatus, cacheBase, baseWords, baseLines, baseLen, baseTitle, 0, finalBaselineNote}));
             engine.requestHistory.put(0, baseline);
 
             int total = variants.size();
@@ -239,7 +324,7 @@ public class ScanEngine {
                         if (st == -1) consecutiveResets++; else consecutiveResets = 0;
                         if (st == 429 || st == 503) rateLimitedStreak++; else rateLimitedStreak = 0;
 
-                        String notes = computeNotes(rr, bodyStr, st, len, words, baseStatus, baseLen, baseWords, baseHash);
+                        String notes = computeNotes(rr, bodyStr, st, len, words, baseStatus, baseLen, baseWords, baseHash, oracle);
                         if (st == 429 || st == 503) notes = "RATE_LIMITED(" + st + ") " + notes;
                         if (wcdConfirmed) notes = "🎯 WCD CONFIRMED (MISS→HIT) " + notes;
                         final String finalNotes  = notes.trim();
@@ -272,7 +357,7 @@ public class ScanEngine {
 
                         processedCount++;
                         if (isInterestingNote(finalNotes))           interestingCount++;
-                        if (finalNotes.contains("POTENTIAL BYPASS") || wcdConfirmed) bypassCount++;
+                        if ((finalNotes.contains("POTENTIAL BYPASS") && !finalNotes.contains("LIKELY_FALSE_POSITIVE")) || wcdConfirmed) bypassCount++;
 
                         if (consecutiveResets >= wafThreshold) {
                             engine.isRunning.set(false);
@@ -345,7 +430,7 @@ public class ScanEngine {
                             Thread.sleep(currentDelay);
                         }
 
-                        String notes = computeNotes(rr, bodyStr, st, len, words, baseStatus, baseLen, baseWords, baseHash);
+                        String notes = computeNotes(rr, bodyStr, st, len, words, baseStatus, baseLen, baseWords, baseHash, oracle);
                         if (st == 429 || st == 503) notes = "RATE_LIMITED(" + st + ") " + notes;
                         if (wcdConfirmed) notes = "🎯 WCD CONFIRMED (MISS→HIT) " + notes;
                         final String finalNotes  = notes.trim();
@@ -377,7 +462,7 @@ public class ScanEngine {
 
                         processedCount++;
                         if (isInterestingNote(finalNotes))           interestingCount++;
-                        if (finalNotes.contains("POTENTIAL BYPASS") || wcdConfirmed) bypassCount++;
+                        if ((finalNotes.contains("POTENTIAL BYPASS") && !finalNotes.contains("LIKELY_FALSE_POSITIVE")) || wcdConfirmed) bypassCount++;
 
                         if (consecutiveResets >= wafThreshold) {
                             engine.isRunning.set(false);
@@ -463,12 +548,29 @@ public class ScanEngine {
 
     public String computeNotes(HttpRequestResponse rr, String bodyStr, int st, int len, int words,
                                 int baseStatus, int baseLen, int baseWords, String baseHash) {
+        return computeNotes(rr, bodyStr, st, len, words, baseStatus, baseLen, baseWords, baseHash, Oracle.disabled());
+    }
+
+    public String computeNotes(HttpRequestResponse rr, String bodyStr, int st, int len, int words,
+                                int baseStatus, int baseLen, int baseWords, String baseHash, Oracle oracle) {
         StringBuilder notes = new StringBuilder();
+        String currentHash = HttpUtils.bodyHash(bodyStr);
 
         if (st != baseStatus) {
             if (st >= 200 && st < 300
-                    && (baseStatus == 401 || baseStatus == 403 || baseStatus == 404 || baseStatus == 405))
+                    && (baseStatus == 401 || baseStatus == 403 || baseStatus == 404 || baseStatus == 405)) {
                 notes.append("🎯 POTENTIAL BYPASS ");
+                // Bypass Oracle: a 2xx that matches the catch-all probe (or the server
+                // answers 2xx for everything) is almost certainly a false positive.
+                boolean matchesCatchAll = !currentHash.isEmpty()
+                        && currentHash.equals(oracle.catchAllHash);
+                boolean nearCatchAllLen = oracle.catchAllIs2xx() && oracle.catchAllLen >= 0
+                        && Math.abs(len - oracle.catchAllLen) <= 50;
+                if (matchesCatchAll || nearCatchAllLen)
+                    notes.append("⚠️ LIKELY_FALSE_POSITIVE(catch-all) ");
+                else if (oracle.catchAllStatus >= 0 && !oracle.catchAllIs2xx())
+                    notes.append("CONF:HIGH ");
+            }
             else if ((st == 301 || st == 302 || st == 307 || st == 308)
                     && (baseStatus == 401 || baseStatus == 403))
                 notes.append("🔀 REDIRECT BYPASS? ");
@@ -478,15 +580,17 @@ public class ScanEngine {
                 notes.append("STATUS_CHANGE ");
         }
 
-        String currentHash = HttpUtils.bodyHash(bodyStr);
         boolean bodyDiffers = !currentHash.isEmpty() && !baseHash.isEmpty() && !currentHash.equals(baseHash);
         if (bodyDiffers && st == baseStatus) {
             if (st >= 200 && st < 300) notes.append("⚠️ BODY_BYPASS? ");
             else                        notes.append("BODY_DIFF ");
         }
 
-        if (words != baseWords)           notes.append("WORD_DELTA ");
-        if (Math.abs(len - baseLen) > 50) notes.append("LEN_DELTA ");
+        // On an unstable baseline these size deltas are mostly jitter — suppress them.
+        if (oracle.baselineStable) {
+            if (words != baseWords)           notes.append("WORD_DELTA ");
+            if (Math.abs(len - baseLen) > 50) notes.append("LEN_DELTA ");
+        }
 
         CacheAnalyzer.Result ci = HttpUtils.cacheInfo(rr);
         String ccLc = HttpUtils.getHeaderValue(rr, "Cache-Control").toLowerCase(java.util.Locale.ROOT);
@@ -513,6 +617,14 @@ public class ScanEngine {
      */
     public static boolean isInterestingNote(String notes) {
         if (notes == null || notes.isEmpty()) return false;
+        // A bypass that only matches the catch-all probe is a false positive, not a finding.
+        if (notes.contains("LIKELY_FALSE_POSITIVE")
+                && !notes.contains("WCD CONFIRMED")
+                && !notes.contains("CACHE_HIT_CACHEABLE")
+                && !notes.contains("HIT_VARY_COOKIE")
+                && !notes.contains("SENSITIVE_DATA")
+                && !notes.contains("CUSTOM:"))
+            return false;
         return notes.contains("POTENTIAL BYPASS")
             || notes.contains("REDIRECT BYPASS")
             || notes.contains("PATH_CONFUSION")
