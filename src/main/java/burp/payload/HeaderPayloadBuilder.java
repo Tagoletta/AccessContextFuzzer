@@ -88,14 +88,18 @@ public class HeaderPayloadBuilder {
             out.add(new Variant("REWRITE: X-Accel-Redirect → " + pathOnly,
                     EncoderUtils.addOrReplaceHeader(baseReq, "X-Accel-Redirect", pathOnly)));
 
-            out.add(new Variant("H2: :authority=localhost",
-                    EncoderUtils.addOrReplaceHeader(baseReq, ":authority", "localhost")));
-            out.add(new Variant("H2: :authority=127.0.0.1",
-                    EncoderUtils.addOrReplaceHeader(baseReq, ":authority", "127.0.0.1")));
-            out.add(new Variant("H2: :path=" + pathOnly,
-                    EncoderUtils.addOrReplaceHeader(baseReq.withPath("/"), ":path", pathOnly)));
-            out.add(new Variant("H2: :path=" + path,
-                    EncoderUtils.addOrReplaceHeader(baseReq.withPath("/"), ":path", path)));
+            // HTTP/2 pseudo-headers are only valid on HTTP/2+ requests; adding them
+            // as ordinary header lines on HTTP/1.1 produces an invalid request.
+            if (EncoderUtils.isHttp2(baseReq.httpVersion())) {
+                out.add(new Variant("H2: :authority=localhost",
+                        EncoderUtils.addOrReplaceHeader(baseReq, ":authority", "localhost")));
+                out.add(new Variant("H2: :authority=127.0.0.1",
+                        EncoderUtils.addOrReplaceHeader(baseReq, ":authority", "127.0.0.1")));
+                out.add(new Variant("H2: :path=" + pathOnly,
+                        EncoderUtils.addOrReplaceHeader(baseReq.withPath("/"), ":path", pathOnly)));
+                out.add(new Variant("H2: :path=" + path,
+                        EncoderUtils.addOrReplaceHeader(baseReq.withPath("/"), ":path", path)));
+            }
 
             out.add(new Variant("SCHEME: X-Forwarded-Proto=https",  EncoderUtils.addOrReplaceHeader(baseReq, "X-Forwarded-Proto",  "https")));
             out.add(new Variant("SCHEME: X-Forwarded-Scheme=https", EncoderUtils.addOrReplaceHeader(baseReq, "X-Forwarded-Scheme", "https")));

@@ -23,8 +23,8 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Build JAR with Maven
-        run: mvn package -DskipTests
+      - name: Build JAR with Maven (runs unit tests)
+        run: mvn package
 
       - name: Find JAR file
         id: find_jar

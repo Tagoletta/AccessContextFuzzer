@@ -1,9 +1,13 @@
 package burp.util;
 
+import burp.api.montoya.http.message.HttpHeader;
 import burp.api.montoya.http.message.HttpRequestResponse;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
 import java.util.StringTokenizer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -11,6 +15,37 @@ import java.util.regex.Pattern;
 public class HttpUtils {
 
     private HttpUtils() {}
+
+    // Volatile tokens that change on every response and would otherwise make an
+    // identical page look "changed" in the body diff. Stripped before hashing.
+    private static final Pattern VT_JWT   = Pattern.compile("eyJ[A-Za-z0-9_-]+\\.eyJ[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)?");
+    private static final Pattern VT_UUID  = Pattern.compile("\\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\b");
+    private static final Pattern VT_HEX   = Pattern.compile("\\b[0-9a-fA-F]{32,}\\b");
+    private static final Pattern VT_TS    = Pattern.compile("\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?");
+    private static final Pattern VT_JSON  = Pattern.compile(
+            "(\"(?:_?csrf(?:_?token)?|csrftoken|authenticity_token|_token|nonce|requestverificationtoken)\"\\s*:\\s*\")[^\"]*(\")",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern VT_INPUT = Pattern.compile(
+            "(name=\"(?:__RequestVerificationToken|_?csrf[^\"]*|authenticity_token)\"[^>]*\\bvalue=\")[^\"]*(\")",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
+    /**
+     * Replace per-request volatile tokens (JWTs, UUIDs, long hex digests, ISO
+     * timestamps, CSRF/nonce fields) with fixed placeholders so that two
+     * semantically identical responses hash the same. Used only for the body
+     * diff — it never changes what is shown to the user.
+     */
+    public static String normalizeForHash(String body) {
+        if (body == null || body.isEmpty()) return "";
+        String s = body;
+        s = VT_JWT.matcher(s).replaceAll("#JWT#");
+        s = VT_UUID.matcher(s).replaceAll("#UUID#");
+        s = VT_HEX.matcher(s).replaceAll("#HEX#");
+        s = VT_TS.matcher(s).replaceAll("#TS#");
+        s = VT_JSON.matcher(s).replaceAll("$1#TOK#$2");
+        s = VT_INPUT.matcher(s).replaceAll("$1#TOK#$2");
+        return s;
+    }
 
     private static final ThreadLocal<MessageDigest> MD5_TL = ThreadLocal.withInitial(() -> {
         try { return MessageDigest.getInstance("MD5"); } catch (Exception e) { throw new RuntimeException(e); }
@@ -53,9 +88,10 @@ public class HttpUtils {
     public static String bodyHash(String body) {
         try {
             if (body == null || body.isEmpty()) return "";
+            String normalized = normalizeForHash(body);
             MessageDigest md = MD5_TL.get();
             md.reset();
-            byte[] digest = md.digest(body.getBytes(StandardCharsets.UTF_8));
+            byte[] digest = md.digest(normalized.getBytes(StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder(32);
             for (byte b : digest) sb.append(String.format("%02x", b & 0xff));
             return sb.toString();
@@ -125,19 +161,27 @@ public class HttpUtils {
         }
     }
 
-    public static String computeCacheStatus(HttpRequestResponse rr) {
+    /** All response headers as a lower-cased name → value map (repeated headers joined with ", "). */
+    public static Map<String, String> headerMap(HttpRequestResponse rr) {
+        Map<String, String> m = new HashMap<>();
         try {
-            String xCache = getHeaderValue(rr, "X-Cache");
-            String cc     = getHeaderValue(rr, "Cache-Control").toLowerCase(java.util.Locale.ROOT);
-            String vary   = getHeaderValue(rr, "Vary").toLowerCase(java.util.Locale.ROOT);
-            if (cc.contains("no-store")) return "NO-STORE 🚫";
-            if (cc.contains("private"))  return "PRIVATE 🚫";
-            if (xCache.toUpperCase(java.util.Locale.ROOT).contains("HIT"))
-                return vary.contains("cookie") ? "HIT/Vary:Cookie" : "HIT ✅";
-            if (xCache.toUpperCase(java.util.Locale.ROOT).contains("MISS")) return "MISS";
-            if (!xCache.isEmpty()) return xCache;
-            if (cc.contains("s-maxage")) return "CDN-CACHE?";
-            return "?";
-        } catch (Throwable t) { return "?"; }
+            if (rr == null || rr.response() == null) return m;
+            for (HttpHeader h : rr.response().headers()) {
+                if (h == null || h.name() == null) continue;
+                String k = h.name().toLowerCase(Locale.ROOT);
+                String v = h.value() == null ? "" : h.value();
+                m.merge(k, v, (a, b) -> a + ", " + b);
+            }
+        } catch (Throwable t) { /* ignore */ }
+        return m;
+    }
+
+    /** Vendor-agnostic cache analysis (Cloudflare, Vercel, Fastly, Akamai, Nginx, RFC 9211…). */
+    public static CacheAnalyzer.Result cacheInfo(HttpRequestResponse rr) {
+        return CacheAnalyzer.analyze(headerMap(rr));
+    }
+
+    public static String computeCacheStatus(HttpRequestResponse rr) {
+        try { return cacheInfo(rr).label; } catch (Throwable t) { return "?"; }
     }
 }

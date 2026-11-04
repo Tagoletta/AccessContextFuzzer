@@ -6,6 +6,7 @@ import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.payload.HeaderPayloadBuilder;
 import burp.payload.PathPayloadBuilder;
 import burp.payload.SelectionPayloadBuilder;
+import burp.util.CacheAnalyzer;
 import burp.util.HttpUtils;
 
 import javax.swing.*;
@@ -106,25 +107,22 @@ public class ScanEngine {
      * to HIT. On confirmation, returns the HIT result (so the row shows the cached
      * response) and confirmed=true; otherwise returns the original result unchanged.
      */
-    private WcdCheck verifyWcdMissToHit(FuzzResult fr, HttpRequest req) throws InterruptedException {
+    private WcdCheck verifyWcdMissToHit(FuzzResult fr, HttpRequest req, int delayMs) throws InterruptedException {
         if (fr == null || fr.rr == null) return new WcdCheck(fr, false);
-        String xcV = HttpUtils.getHeaderValue(fr.rr, "X-Cache").toUpperCase(java.util.Locale.ROOT);
-        String ccV = HttpUtils.getHeaderValue(fr.rr, "Cache-Control").toLowerCase(java.util.Locale.ROOT);
-        boolean isMissAndCacheable = HttpUtils.statusOf(fr.rr) == 200
-                && !ccV.contains("private") && !ccV.contains("no-store")
-                && (ccV.contains("max-age") || ccV.contains("s-maxage"))
-                && (xcV.isEmpty() || !xcV.contains("HIT"));
+        CacheAnalyzer.Result c0 = HttpUtils.cacheInfo(fr.rr);
+        boolean isMissAndCacheable = HttpUtils.statusOf(fr.rr) == 200 && c0.cacheableByCc && !c0.hit;
         if (!isMissAndCacheable) return new WcdCheck(fr, false);
         ctx.api.logging().logToOutput("[ACF-WCD] Cacheable MISS → verifying: " + req.path());
+        long sleepMs = Math.max(250, delayMs);
         for (int attempt = 1; attempt <= 4; attempt++) {
-            Thread.sleep(250);
+            Thread.sleep(sleepMs);
             FuzzResult fr2 = executeSingle(req);
             if (fr2 != null && fr2.rr != null) {
-                String xc2 = HttpUtils.getHeaderValue(fr2.rr, "X-Cache").toUpperCase(java.util.Locale.ROOT);
+                CacheAnalyzer.Result c2 = HttpUtils.cacheInfo(fr2.rr);
                 String age2 = HttpUtils.getHeaderValue(fr2.rr, "Age");
-                ctx.api.logging().logToOutput("[ACF-WCD] attempt=" + attempt + " X-Cache=" + xc2
+                ctx.api.logging().logToOutput("[ACF-WCD] attempt=" + attempt + " cache=" + c2.label
                         + (age2.isEmpty() ? "" : " Age=" + age2) + " path=" + req.path());
-                if (xc2.contains("HIT")) {
+                if (c2.hit) {
                     ctx.api.logging().logToOutput("[ACF-WCD] ✅ CONFIRMED miss→hit: " + req.path());
                     return new WcdCheck(fr2, true);
                 }
@@ -206,7 +204,7 @@ public class ScanEngine {
                         futures.add(batchPool.submit(() -> executeSingle(fv.request)));
                     }
 
-                    int consecutiveResets = 0;
+                    int consecutiveResets = 0, rateLimitedStreak = 0;
                     long totalRttMs = 0; int rttCount = 0;
 
                     for (int i = 0; i < futures.size() && engine.isRunning.get(); i++) {
@@ -215,7 +213,7 @@ public class ScanEngine {
                         catch (TimeoutException te) { futures.get(i).cancel(true); fr = new FuzzResult(null, 60000); }
 
                         // WCD cache verification: cacheable MISS → resend to confirm HIT
-                        WcdCheck wcd = verifyWcdMissToHit(fr, variants.get(i).request);
+                        WcdCheck wcd = verifyWcdMissToHit(fr, variants.get(i).request, delayMs);
                         fr = wcd.fr;
                         boolean wcdConfirmed = wcd.confirmed;
                         HttpRequestResponse rr = fr != null ? fr.rr : null;
@@ -239,6 +237,7 @@ public class ScanEngine {
                                 : String.format("~%ds remaining", etaSec);
 
                         if (st == -1) consecutiveResets++; else consecutiveResets = 0;
+                        if (st == 429 || st == 503) rateLimitedStreak++; else rateLimitedStreak = 0;
 
                         String notes = computeNotes(rr, bodyStr, st, len, words, baseStatus, baseLen, baseWords, baseHash);
                         if (st == 429 || st == 503) notes = "RATE_LIMITED(" + st + ") " + notes;
@@ -250,15 +249,12 @@ public class ScanEngine {
                         final String finalEta    = etaStr;
                         final int finalRtt       = (int) rttMs;
 
-                        String rrCC = HttpUtils.getHeaderValue(rr, "Cache-Control").toLowerCase(java.util.Locale.ROOT);
-                        String rrXC = HttpUtils.getHeaderValue(rr, "X-Cache").toUpperCase(java.util.Locale.ROOT);
-                        String rrVary = HttpUtils.getHeaderValue(rr, "Vary").toLowerCase(java.util.Locale.ROOT);
-                        boolean rrHit = rrXC.contains("HIT");
-                        if (rrHit) wcdCachedCount++;
-                        if (rrCC.contains("private"))  wcdPrivateCount++;
-                        if (rrCC.contains("no-store")) wcdNoStoreCount++;
-                        if (rrHit && rrVary.contains("cookie")) wcdVaryCookieCount++;
-                        if (rrHit && !rrCC.contains("private") && !rrCC.contains("no-store") && !rrVary.contains("cookie")) {
+                        CacheAnalyzer.Result cacheState = HttpUtils.cacheInfo(rr);
+                        if (cacheState.hit) wcdCachedCount++;
+                        if (cacheState.isPrivate) wcdPrivateCount++;
+                        if (cacheState.noStore)   wcdNoStoreCount++;
+                        if (cacheState.hit && cacheState.cookieInVary) wcdVaryCookieCount++;
+                        if (cacheState.hit && !cacheState.isPrivate && !cacheState.noStore && !cacheState.cookieInVary) {
                             wcdPotentialCount++;
                             wcdPotentialVariants.add(varName);
                         }
@@ -284,6 +280,26 @@ public class ScanEngine {
                             SwingUtilities.invokeLater(() -> showWafDialog(engine, rc));
                             break;
                         }
+
+                        // Parallel mode cannot throttle per-request, so repeated rate limiting
+                        // stops the scan and cancels the still-queued requests.
+                        if (rateLimitedStreak >= 3) {
+                            engine.isRunning.set(false);
+                            for (int j = i + 1; j < futures.size(); j++) futures.get(j).cancel(true);
+                            final int rls = rateLimitedStreak;
+                            SwingUtilities.invokeLater(() -> {
+                                engine.progressBar.setString("Rate limited — parallel scan stopped");
+                                engine.progressBar.setForeground(new java.awt.Color(255, 165, 0));
+                                JOptionPane.showMessageDialog(null,
+                                    "Repeated rate limiting (" + rls + " consecutive 429/503) in parallel mode.\n\n"
+                                    + "Parallel mode cannot throttle individual requests, so the scan was stopped and\n"
+                                    + "the remaining queued requests were cancelled to protect the target and your session.\n\n"
+                                    + "Switch to sequential mode (uncheck Parallel Mode) for adaptive back-off,\n"
+                                    + "or lower the thread count.",
+                                    "Rate Limited — Parallel Mode", JOptionPane.WARNING_MESSAGE);
+                            });
+                            break;
+                        }
                     }
                 } else {
                     int idx = 1, consecutiveResets = 0, currentDelay = delayMs;
@@ -297,7 +313,7 @@ public class ScanEngine {
                         final int rowNo = idx++;
                         FuzzResult fr = executeSingle(v.request);
                         // WCD cache verification: cacheable MISS → resend to confirm HIT
-                        WcdCheck wcd = verifyWcdMissToHit(fr, v.request);
+                        WcdCheck wcd = verifyWcdMissToHit(fr, v.request, currentDelay);
                         fr = wcd.fr;
                         boolean wcdConfirmed = wcd.confirmed;
                         HttpRequestResponse rr = fr.rr;
@@ -338,15 +354,12 @@ public class ScanEngine {
                         final String finalEta    = etaStr;
                         final int finalRtt       = (int) fr.rttMs;
 
-                        String rrCC = HttpUtils.getHeaderValue(rr, "Cache-Control").toLowerCase(java.util.Locale.ROOT);
-                        String rrXC = HttpUtils.getHeaderValue(rr, "X-Cache").toUpperCase(java.util.Locale.ROOT);
-                        String rrVary = HttpUtils.getHeaderValue(rr, "Vary").toLowerCase(java.util.Locale.ROOT);
-                        boolean rrHit = rrXC.contains("HIT");
-                        if (rrHit) wcdCachedCount++;
-                        if (rrCC.contains("private"))  wcdPrivateCount++;
-                        if (rrCC.contains("no-store")) wcdNoStoreCount++;
-                        if (rrHit && rrVary.contains("cookie")) wcdVaryCookieCount++;
-                        if (rrHit && !rrCC.contains("private") && !rrCC.contains("no-store") && !rrVary.contains("cookie")) {
+                        CacheAnalyzer.Result cacheState = HttpUtils.cacheInfo(rr);
+                        if (cacheState.hit) wcdCachedCount++;
+                        if (cacheState.isPrivate) wcdPrivateCount++;
+                        if (cacheState.noStore)   wcdNoStoreCount++;
+                        if (cacheState.hit && cacheState.cookieInVary) wcdVaryCookieCount++;
+                        if (cacheState.hit && !cacheState.isPrivate && !cacheState.noStore && !cacheState.cookieInVary) {
                             wcdPotentialCount++;
                             wcdPotentialVariants.add(finalVName);
                         }
@@ -475,23 +488,17 @@ public class ScanEngine {
         if (words != baseWords)           notes.append("WORD_DELTA ");
         if (Math.abs(len - baseLen) > 50) notes.append("LEN_DELTA ");
 
-        String xCache        = HttpUtils.getHeaderValue(rr, "X-Cache");
-        String cacheControl  = HttpUtils.getHeaderValue(rr, "Cache-Control");
-        String vary          = HttpUtils.getHeaderValue(rr, "Vary");
-        String age           = HttpUtils.getHeaderValue(rr, "Age");
+        CacheAnalyzer.Result ci = HttpUtils.cacheInfo(rr);
+        String ccLc = HttpUtils.getHeaderValue(rr, "Cache-Control").toLowerCase(java.util.Locale.ROOT);
+        String age  = HttpUtils.getHeaderValue(rr, "Age");
 
-        boolean isCacheHit   = xCache.toUpperCase(java.util.Locale.ROOT).contains("HIT");
-        boolean isPrivate    = cacheControl.toLowerCase(java.util.Locale.ROOT).contains("private");
-        boolean isNoStore    = cacheControl.toLowerCase(java.util.Locale.ROOT).contains("no-store");
-        boolean cookieInVary = vary.toLowerCase(java.util.Locale.ROOT).contains("cookie");
-
-        if (isCacheHit && !isPrivate && !isNoStore && !cookieInVary) notes.append("🎯 CACHE_HIT_CACHEABLE ");
-        if (isCacheHit && cookieInVary)  notes.append("HIT_VARY_COOKIE ");
-        if (!xCache.isEmpty() && !isCacheHit) notes.append("X-Cache:").append(xCache).append(" ");
-        if (isPrivate)  notes.append("CC:PRIVATE ");
-        if (isNoStore)  notes.append("CC:NO-STORE ");
-        if (cacheControl.contains("s-maxage")) notes.append("CC:S-MAXAGE ");
-        if (cacheControl.contains("max-age") && !isPrivate && !isNoStore) notes.append("CC:MAX-AGE ");
+        if (ci.hit && !ci.isPrivate && !ci.noStore && !ci.cookieInVary) notes.append("🎯 CACHE_HIT_CACHEABLE ");
+        if (ci.hit && ci.cookieInVary) notes.append("HIT_VARY_COOKIE ");
+        if (!ci.hit && ci.miss)        notes.append("CACHE:MISS ");
+        if (ci.isPrivate) notes.append("CC:PRIVATE ");
+        if (ci.noStore)   notes.append("CC:NO-STORE ");
+        if (ccLc.contains("s-maxage")) notes.append("CC:S-MAXAGE ");
+        if (ccLc.contains("max-age") && !ci.isPrivate && !ci.noStore) notes.append("CC:MAX-AGE ");
         if (!age.isEmpty()) notes.append("Age:").append(age).append(" ");
 
         HttpUtils.detectSensitiveData(bodyStr, notes);
@@ -562,16 +569,19 @@ public class ScanEngine {
                 String authBody = HttpUtils.bodyStr(warm);
                 String authHash = HttpUtils.bodyHash(authBody);
                 String cc   = HttpUtils.getHeaderValue(warm, "Cache-Control");
-                String warmXc = HttpUtils.getHeaderValue(warm, "X-Cache").toUpperCase(java.util.Locale.ROOT);
-                boolean isPrivate = cc.toLowerCase(java.util.Locale.ROOT).contains("private");
-                boolean isNoStore = cc.toLowerCase(java.util.Locale.ROOT).contains("no-store");
+                CacheAnalyzer.Result warmCache = HttpUtils.cacheInfo(warm);
+                String warmXc = warmCache.label;
+                boolean isPrivate = warmCache.isPrivate;
+                boolean isNoStore = warmCache.noStore;
+                boolean warmHit   = warmCache.hit;
                 ctx.api.logging().logToOutput("[ACF-WCD-VERIFY] warm(auth) status=" + authStatus
-                        + " X-Cache=" + (warmXc.isEmpty() ? "(none)" : warmXc) + " url=" + url);
-                for (int i = 0; i < 3 && !warmXc.contains("HIT") && !isPrivate && !isNoStore; i++) {
+                        + " cache=" + warmXc + " url=" + url);
+                for (int i = 0; i < 3 && !warmHit && !isPrivate && !isNoStore; i++) {
                     Thread.sleep(250);
                     HttpRequestResponse w2 = ctx.api.http().sendRequest(authReq);
-                    warmXc = HttpUtils.getHeaderValue(w2, "X-Cache").toUpperCase(java.util.Locale.ROOT);
-                    if (warmXc.contains("HIT")) { warm = w2; authBody = HttpUtils.bodyStr(w2); authHash = HttpUtils.bodyHash(authBody); }
+                    CacheAnalyzer.Result wc2 = HttpUtils.cacheInfo(w2);
+                    warmXc = wc2.label; warmHit = wc2.hit;
+                    if (warmHit) { warm = w2; authBody = HttpUtils.bodyStr(w2); authHash = HttpUtils.bodyHash(authBody); }
                 }
 
                 // ── Phase 2: replay without auth ────────────────────────────────
@@ -582,12 +592,13 @@ public class ScanEngine {
                         .withRemovedHeader("X-API-Key");
                 HttpRequestResponse res = ctx.api.http().sendRequest(noAuthReq);
                 int st        = HttpUtils.statusOf(res);
-                String xCache = HttpUtils.getHeaderValue(res, "X-Cache");
+                CacheAnalyzer.Result noAuthCache = HttpUtils.cacheInfo(res);
+                String xCache = noAuthCache.label;
                 String vary   = HttpUtils.getHeaderValue(res, "Vary");
                 String noAuthBody = HttpUtils.bodyStr(res);
                 String noAuthHash = HttpUtils.bodyHash(noAuthBody);
-                boolean isHit      = xCache.toUpperCase(java.util.Locale.ROOT).contains("HIT");
-                boolean varyCookie = vary.toLowerCase(java.util.Locale.ROOT).contains("cookie");
+                boolean isHit      = noAuthCache.hit;
+                boolean varyCookie = noAuthCache.cookieInVary;
                 boolean sameAsAuth = !authHash.isEmpty() && authHash.equals(noAuthHash);
                 StringBuilder sens = new StringBuilder();
                 HttpUtils.detectSensitiveData(noAuthBody, sens);
