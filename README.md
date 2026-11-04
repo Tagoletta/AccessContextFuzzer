@@ -216,6 +216,26 @@ Access Context Fuzzer has been significantly upgraded to tackle modern web appli
 
 ---
 
+### 🔀 How it differs from other bypass extensions
+
+Access Context Fuzzer is often compared to single-purpose bypass tools such as **403 Bypasser**, **429 Bypasser** and **Bypass WAF**. Those are focused payload generators — they add header/path variations to get past a 403, a 429, or a WAF. Access Context Fuzzer is a broader **access-context testing suite**, and two things set it apart:
+
+**1. Web Cache Deception — a whole capability the others don't have.**
+No 403/429/WAF-bypass extension tests WCD. Access Context Fuzzer treats it as a first-class engine:
+- A 4-phase pipeline (delimiter discovery → static-extension combos → normalization discrepancy → exploit payloads), including the exact `/path/abc.js` path-mapping vector from PortSwigger's labs.
+- **Vendor-agnostic cache detection** across Cloudflare (`cf-cache-status`), Vercel (`x-vercel-cache`), Akamai/Fastly/CloudFront/Varnish (`X-Cache`), Nginx and RFC 9211 (`Cache-Status`) — not just `X-Cache`.
+- **Automatic confirmation, not just flagging:** a cacheable `MISS` is resent to confirm it flips to `HIT`, and a right-click **warm + no-auth replay** proves whether an unauthenticated attacker actually receives the cached authenticated content. Results collect in a dedicated **WCD Findings** tab.
+
+**2. Confirmation and signal quality, not just payload volume.**
+The other tools report every status change; Access Context Fuzzer adds a verification layer to cut false positives:
+- A **Bypass Oracle** probes a guaranteed-nonexistent path first, so a `403 → 200` that merely matches the site's catch-all/soft-404 is marked `LIKELY_FALSE_POSITIVE` instead of a "bypass", while a genuinely distinct response is tagged `CONF:HIGH`.
+- **Baseline calibration** detects unstable targets, and **body-diff normalization** masks rotating tokens (CSRF/JWT/timestamps) so identical pages don't look "changed".
+- Automatic **sensitive-data detection** (JWT, Bearer, API keys, CSRF, emails) and user-defined regex rules.
+
+It also **unifies** header-based bypass (IP/host/method/scheme/URL-rewrite, 40+ variants), path normalization/encoding bypass, and arbitrary selection fuzzing into one engine with a shared, color-coded results table, Repeater/Site-map integration, OPSEC IP checks, parallel mode with adaptive rate-limit back-off, and session-drift detection — rather than being a single bypass vector. In short: the others help you get past one control; Access Context Fuzzer systematically tests access control **and** Web Cache Deception, and confirms what it finds.
+
+---
+
 <a id="features"></a>
 
 ## ✨ Features
