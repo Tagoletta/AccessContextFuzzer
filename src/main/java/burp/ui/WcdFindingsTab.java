@@ -39,14 +39,20 @@ public class WcdFindingsTab {
                     ResultsPanel.showRequestResponseDialog(ctx, rr,
                             "WCD Finding: " + ctx.wcdFindingsModel.getValueAt(modelRow, 2));
                 else
-                    JOptionPane.showMessageDialog(null, "No stored response for this finding.",
+                    JOptionPane.showMessageDialog(ctx.suiteFrame(), "No stored response for this finding.",
                             "WCD Findings", JOptionPane.INFORMATION_MESSAGE);
             }
         });
 
         JPanel ctrl = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton btnClear = new JButton("Clear Findings");
-        btnClear.addActionListener(e -> ctx.wcdFindingsModel.setRowCount(0));
+        btnClear.addActionListener(e -> {
+            ctx.wcdFindingsModel.setRowCount(0);
+            // Also release the backing request/response bytes, which otherwise
+            // accumulate for the lifetime of the Burp project (unbounded heap).
+            ctx.wcdFindingsHistory.clear();
+            ctx.wcdFindingsSeq.set(0);
+        });
         ctrl.add(btnClear);
         ctrl.add(new JLabel("  Double-click a row to view the stored request/response. In-memory; cleared on Burp restart."));
 

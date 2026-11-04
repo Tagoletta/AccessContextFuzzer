@@ -60,7 +60,7 @@ public class SettingsTab {
         JButton btnSave = new JButton("💾 Save Settings Now");
         btnSave.addActionListener(e -> {
             save(ctx);
-            JOptionPane.showMessageDialog(null, "Settings saved.", "Saved", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(ctx.suiteFrame(), "Settings saved.", "Saved", JOptionPane.INFORMATION_MESSAGE);
         });
         saveRow.add(btnSave);
         saveRow.add(new JLabel("  Settings also auto-save on extension unload."));

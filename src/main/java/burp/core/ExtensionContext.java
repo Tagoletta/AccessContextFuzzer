@@ -4,12 +4,13 @@ import burp.api.montoya.MontoyaApi;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
+import java.awt.Frame;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.ExecutorService;
 
 public class ExtensionContext {
 
-    public static final String VERSION = "2.5.0";
+    public static final String VERSION = "2.5.1";
     public static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     public final MontoyaApi api;
@@ -56,5 +57,20 @@ public class ExtensionContext {
         this.api = api;
         this.mainTabs = mainTabs;
         this.taskExecutor = taskExecutor;
+    }
+
+    /**
+     * The Burp suite's top-level frame, used as the parent for dialogs and file
+     * choosers so they stay anchored to Burp (and appear on the correct monitor
+     * in multi-monitor setups) instead of being created with a null parent.
+     * Falls back to resolving the frame from the main tabs if the API helper
+     * is unavailable for any reason.
+     */
+    public Frame suiteFrame() {
+        try {
+            Frame f = api.userInterface().swingUtils().suiteFrame();
+            if (f != null) return f;
+        } catch (Exception ignored) {}
+        return (Frame) SwingUtilities.getAncestorOfClass(Frame.class, mainTabs);
     }
 }

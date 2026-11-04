@@ -103,8 +103,8 @@ public class ResultsPanel {
         setupTableEvents(ctx, engine, scanEngine, name);
 
         engine.btnStop.addActionListener(e -> scanEngine.stopEngine(engine));
-        engine.btnExport.addActionListener(e -> exportToCsv(engine.model, name));
-        btnReport.addActionListener(e -> exportHtmlReport(engine.model, name));
+        engine.btnExport.addActionListener(e -> exportToCsv(ctx, engine.model, name));
+        btnReport.addActionListener(e -> exportHtmlReport(ctx, engine.model, name));
         engine.btnRerun.addActionListener(e -> scanEngine.rerunFuzzing(engine));
         engine.btnFilter.addActionListener(e -> toggleInterestingFilter(engine));
         engine.btnPreview.addActionListener(e -> scanEngine.showPayloadPreview(engine));
@@ -188,7 +188,7 @@ public class ResultsPanel {
                 }
             }
             if (sent > 0)
-                JOptionPane.showMessageDialog(null, sent + " request(s) sent to Repeater.",
+                JOptionPane.showMessageDialog(ctx.suiteFrame(), sent + " request(s) sent to Repeater.",
                         "Sent to Repeater", JOptionPane.INFORMATION_MESSAGE);
         });
 
@@ -208,10 +208,10 @@ public class ResultsPanel {
                 }
             }
             if (sent > 0)
-                JOptionPane.showMessageDialog(null, sent + " interesting request(s) sent to Repeater.",
+                JOptionPane.showMessageDialog(ctx.suiteFrame(), sent + " interesting request(s) sent to Repeater.",
                         "Sent to Repeater", JOptionPane.INFORMATION_MESSAGE);
             else
-                JOptionPane.showMessageDialog(null, "No interesting results found.",
+                JOptionPane.showMessageDialog(ctx.suiteFrame(), "No interesting results found.",
                         "Sent to Repeater", JOptionPane.INFORMATION_MESSAGE);
         });
 
@@ -225,7 +225,7 @@ public class ResultsPanel {
             String curl = toCurl(rrData);
             java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
                     .setContents(new java.awt.datatransfer.StringSelection(curl), null);
-            JOptionPane.showMessageDialog(null, "curl command copied to clipboard.",
+            JOptionPane.showMessageDialog(ctx.suiteFrame(), "curl command copied to clipboard.",
                     "Copy as curl", JOptionPane.INFORMATION_MESSAGE);
         });
 
@@ -235,14 +235,14 @@ public class ResultsPanel {
             int modelRow = engine.table.convertRowIndexToModel(selectedRow);
             int reqId = (int) engine.model.getValueAt(modelRow, 0);
             if (reqId == 0) {
-                JOptionPane.showMessageDialog(null, "Cannot compare baseline with itself.",
+                JOptionPane.showMessageDialog(ctx.suiteFrame(), "Cannot compare baseline with itself.",
                         "Compare", JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
             HttpRequestResponse baseline = engine.requestHistory.get(0);
             HttpRequestResponse variant  = engine.requestHistory.get(reqId);
             if (baseline == null || variant == null) {
-                JOptionPane.showMessageDialog(null, "Request data not available.",
+                JOptionPane.showMessageDialog(ctx.suiteFrame(), "Request data not available.",
                         "Compare", JOptionPane.WARNING_MESSAGE);
                 return;
             }
@@ -394,11 +394,11 @@ public class ResultsPanel {
     }
 
     /** Export all results to a self-contained HTML report, interesting rows highlighted. */
-    private static void exportHtmlReport(DefaultTableModel m, String engineName) {
+    private static void exportHtmlReport(ExtensionContext ctx, DefaultTableModel m, String engineName) {
         if (m.getRowCount() == 0) return;
         JFileChooser f = new JFileChooser();
         f.setSelectedFile(new File("acf-report-" + engineName.replaceAll("[^A-Za-z0-9]", "_") + ".html"));
-        if (f.showSaveDialog(null) != JFileChooser.APPROVE_OPTION) return;
+        if (f.showSaveDialog(ctx.suiteFrame()) != JFileChooser.APPROVE_OPTION) return;
         File file = f.getSelectedFile();
         if (!file.getName().toLowerCase().endsWith(".html"))
             file = new File(file.getParentFile(), file.getName() + ".html");
@@ -436,10 +436,10 @@ public class ResultsPanel {
                 pw.println("</tr>");
             }
             pw.println("</tbody></table></body></html>");
-            JOptionPane.showMessageDialog(null, "HTML report saved:\n" + file.getAbsolutePath(),
+            JOptionPane.showMessageDialog(ctx.suiteFrame(), "HTML report saved:\n" + file.getAbsolutePath(),
                     "HTML Report", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) {
-            JOptionPane.showMessageDialog(null, "Report export failed: " + ex.getMessage(),
+            JOptionPane.showMessageDialog(ctx.suiteFrame(), "Report export failed: " + ex.getMessage(),
                     "Report Error", JOptionPane.ERROR_MESSAGE);
         }
     }
@@ -450,10 +450,10 @@ public class ResultsPanel {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
-    private static void exportToCsv(DefaultTableModel m, String n) {
+    private static void exportToCsv(ExtensionContext ctx, DefaultTableModel m, String n) {
         if (m.getRowCount() == 0) return;
         JFileChooser f = new JFileChooser();
-        if (f.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+        if (f.showSaveDialog(ctx.suiteFrame()) == JFileChooser.APPROVE_OPTION) {
             File file = f.getSelectedFile();
             if (!file.getName().toLowerCase().endsWith(".csv"))
                 file = new File(file.getParentFile(), file.getName() + ".csv");
@@ -473,7 +473,7 @@ public class ResultsPanel {
                     pw.println();
                 }
             } catch (Exception ex) {
-                JOptionPane.showMessageDialog(null, "Export failed: " + ex.getMessage(),
+                JOptionPane.showMessageDialog(ctx.suiteFrame(), "Export failed: " + ex.getMessage(),
                         "Export Error", JOptionPane.ERROR_MESSAGE);
             }
         }
@@ -493,7 +493,7 @@ public class ResultsPanel {
         return panel;
     }
 
-    public static JPanel createTextAreaPanel(String title, JTextArea textArea) {
+    public static JPanel createTextAreaPanel(ExtensionContext ctx, String title, JTextArea textArea) {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createTitledBorder(title));
         panel.add(new JScrollPane(textArea), BorderLayout.CENTER);
@@ -508,17 +508,24 @@ public class ResultsPanel {
             fc.setDialogTitle("Select wordlist / payload file");
             fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                     "Text files", "txt", "lst", "csv", "list"));
-            if (fc.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+            if (fc.showOpenDialog(ctx.suiteFrame()) != JFileChooser.APPROVE_OPTION) return;
+            final java.io.File sel = fc.getSelectedFile();
+            lblInfo.setText("Loading " + sel.getName() + "…");
+            // Read off the EDT so a large wordlist can't freeze Burp's UI; push
+            // the result back onto the EDT with invokeLater.
+            ctx.taskExecutor.submit(() -> {
                 try {
-                    List<String> lines = Files.readAllLines(fc.getSelectedFile().toPath(), StandardCharsets.UTF_8);
-                    String existing = textArea.getText().trim();
-                    textArea.setText(existing.isEmpty() ? String.join("\n", lines)
-                            : existing + "\n" + String.join("\n", lines));
-                    lblInfo.setText(lines.size() + " lines loaded from " + fc.getSelectedFile().getName());
+                    List<String> lines = Files.readAllLines(sel.toPath(), StandardCharsets.UTF_8);
+                    SwingUtilities.invokeLater(() -> {
+                        String existing = textArea.getText().trim();
+                        textArea.setText(existing.isEmpty() ? String.join("\n", lines)
+                                : existing + "\n" + String.join("\n", lines));
+                        lblInfo.setText(lines.size() + " lines loaded from " + sel.getName());
+                    });
                 } catch (Exception ex) {
-                    lblInfo.setText("Error: " + ex.getMessage());
+                    SwingUtilities.invokeLater(() -> lblInfo.setText("Error: " + ex.getMessage()));
                 }
-            }
+            });
         });
         btnClear.addActionListener(e -> { textArea.setText(""); lblInfo.setText("Cleared."); });
         btnPanel.add(btnLoad);

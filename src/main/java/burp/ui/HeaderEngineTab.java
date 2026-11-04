@@ -54,8 +54,8 @@ public class HeaderEngineTab {
         JPanel customPanel = new JPanel(new GridLayout(1, 2, 10, 0));
         ctx.txtHeaderIPs = new JTextArea(4, 20);
         ctx.txtHeaderHeaders = new JTextArea(4, 20);
-        customPanel.add(ResultsPanel.createTextAreaPanel("Custom IPs:", ctx.txtHeaderIPs));
-        customPanel.add(ResultsPanel.createTextAreaPanel("Custom Headers:", ctx.txtHeaderHeaders));
+        customPanel.add(ResultsPanel.createTextAreaPanel(ctx, "Custom IPs:", ctx.txtHeaderIPs));
+        customPanel.add(ResultsPanel.createTextAreaPanel(ctx, "Custom Headers:", ctx.txtHeaderHeaders));
         settingsPanel.add(customPanel);
 
         settingsPanel.setMinimumSize(new Dimension(600, 320));

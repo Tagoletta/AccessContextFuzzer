@@ -38,10 +38,13 @@ public class AccessContextFuzzer implements BurpExtension, ContextMenuItemsProvi
         scanEngine = new ScanEngine(ctx);
 
         api.extension().setName("Access Context Fuzzer");
-        api.logging().logToOutput("[ACF] v2.5.0 loaded — multi-CDN cache detection + bypass oracle active");
+        api.logging().logToOutput("[ACF] v" + ExtensionContext.VERSION + " loaded — multi-CDN cache detection + bypass oracle active");
         api.extension().registerUnloadingHandler(() -> {
             SettingsTab.save(ctx);
             ctx.taskExecutor.shutdownNow();
+            // Release retained WCD request/response bytes on unload.
+            ctx.wcdFindingsHistory.clear();
+            ctx.wcdFindingsSeq.set(0);
         });
 
         JPanel headerPanel    = HeaderEngineTab.build(ctx, scanEngine);

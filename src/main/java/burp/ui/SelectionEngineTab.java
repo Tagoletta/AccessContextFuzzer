@@ -34,7 +34,7 @@ public class SelectionEngineTab {
         settingsPanel.add(togglePanel);
 
         ctx.txtSelCustom = new JTextArea(4, 30);
-        settingsPanel.add(ResultsPanel.createTextAreaPanel("Custom Payloads for Selection:", ctx.txtSelCustom));
+        settingsPanel.add(ResultsPanel.createTextAreaPanel(ctx, "Custom Payloads for Selection:", ctx.txtSelCustom));
 
         settingsPanel.setMinimumSize(new Dimension(600, 300));
         settingsPanel.setPreferredSize(new Dimension(600, 300));

@@ -1,6 +1,7 @@
 package burp.core;
 
 import burp.api.montoya.http.HttpService;
+import burp.api.montoya.http.RequestOptions;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.payload.HeaderPayloadBuilder;
@@ -375,7 +376,7 @@ public class ScanEngine {
                             SwingUtilities.invokeLater(() -> {
                                 engine.progressBar.setString("Rate limited — parallel scan stopped");
                                 engine.progressBar.setForeground(new java.awt.Color(255, 165, 0));
-                                JOptionPane.showMessageDialog(null,
+                                JOptionPane.showMessageDialog(ctx.suiteFrame(),
                                     "Repeated rate limiting (" + rls + " consecutive 429/503) in parallel mode.\n\n"
                                     + "Parallel mode cannot throttle individual requests, so the scan was stopped and\n"
                                     + "the remaining queued requests were cancelled to protect the target and your session.\n\n"
@@ -487,7 +488,7 @@ public class ScanEngine {
                                     final int[] choiceBox = {JOptionPane.YES_OPTION};
                                     try {
                                         SwingUtilities.invokeAndWait(() ->
-                                            choiceBox[0] = JOptionPane.showConfirmDialog(null,
+                                            choiceBox[0] = JOptionPane.showConfirmDialog(ctx.suiteFrame(),
                                                 "Session Drift Detected!\n\nBaseline was " + oldSt + " but now returns " + newSt + ".\n"
                                                 + "Your session may have expired or been invalidated.\n\nContinue scanning?",
                                                 "Session Health Warning", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE));
@@ -814,7 +815,7 @@ public class ScanEngine {
     public void rerunFuzzing(FuzzerEngine engine) {
         if (engine.isRunning.get()) return;
         if (engine.lastRequest == null) {
-            JOptionPane.showMessageDialog(null, "No previous request found. Right-click a request first.",
+            JOptionPane.showMessageDialog(ctx.suiteFrame(), "No previous request found. Right-click a request first.",
                     "Re-run Error", JOptionPane.WARNING_MESSAGE);
             return;
         }
@@ -830,7 +831,7 @@ public class ScanEngine {
                 break;
             case "Selection":
                 if (engine.lastSelectionRange == null) {
-                    JOptionPane.showMessageDialog(null, "No selection range stored. Select text and fuzz first.",
+                    JOptionPane.showMessageDialog(ctx.suiteFrame(), "No selection range stored. Select text and fuzz first.",
                             "Re-run Error", JOptionPane.WARNING_MESSAGE);
                     return;
                 }
@@ -866,7 +867,7 @@ public class ScanEngine {
                 default: return;
             }
         } catch (Exception ex) {
-            JOptionPane.showMessageDialog(null, "Could not generate preview: " + ex.getMessage(),
+            JOptionPane.showMessageDialog(ctx.suiteFrame(), "Could not generate preview: " + ex.getMessage(),
                     "Preview Error", JOptionPane.WARNING_MESSAGE);
             return;
         }
@@ -900,7 +901,7 @@ public class ScanEngine {
     }
 
     private void showPreviewNoRequest() {
-        JOptionPane.showMessageDialog(null,
+        JOptionPane.showMessageDialog(ctx.suiteFrame(),
                 "No target request available yet.\nRight-click a request and run a scan first.",
                 "Payload Preview", JOptionPane.INFORMATION_MESSAGE);
     }
@@ -917,7 +918,10 @@ public class ScanEngine {
                 HttpService service = HttpService.httpService("api.ipify.org", 443, true);
                 HttpRequest req = HttpRequest.httpRequest(service,
                         "GET / HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\nAccept: */*\r\nUser-Agent: AccessContextFuzzer/" + ExtensionContext.VERSION + "\r\n\r\n");
-                HttpRequestResponse res = ctx.api.http().sendRequest(req);
+                // Enforce upstream TLS certificate verification for this outbound
+                // check so the IP response can't be tampered with by a MITM.
+                HttpRequestResponse res = ctx.api.http().sendRequest(req,
+                        RequestOptions.requestOptions().withUpstreamTLSVerification());
                 if (res.response() != null && res.response().statusCode() == 200) {
                     String ip = res.response().bodyToString().trim();
                     SwingUtilities.invokeLater(() -> {
@@ -942,7 +946,7 @@ public class ScanEngine {
 
     public boolean confirmOpsec(JLabel ipLabel) {
         if (ipLabel.getText().contains("Not checked")) {
-            int r = JOptionPane.showConfirmDialog(null,
+            int r = JOptionPane.showConfirmDialog(ctx.suiteFrame(),
                     "Your external IP hasn't been verified!\nContinue without OPSEC check?",
                     "OPSEC Warning", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
             return r == JOptionPane.YES_OPTION;
@@ -1011,7 +1015,7 @@ public class ScanEngine {
     private void showWafDialog(FuzzerEngine engine, int resetCount) {
         engine.progressBar.setString("WAF BLOCKED! Scan stopped.");
         engine.progressBar.setForeground(new java.awt.Color(255, 60, 60));
-        JOptionPane.showMessageDialog(null,
+        JOptionPane.showMessageDialog(ctx.suiteFrame(),
                 "WAF Blocking Detected!\n\n"
                 + resetCount + " consecutive connection resets (status -1) detected.\n"
                 + "The target's WAF/firewall is likely blocking your requests.\n\n"

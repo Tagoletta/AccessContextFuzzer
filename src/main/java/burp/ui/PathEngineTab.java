@@ -106,7 +106,7 @@ public class PathEngineTab {
         settingsPanel.add(wcdPanel);
 
         ctx.txtPathPaths = new JTextArea(3, 30);
-        settingsPanel.add(ResultsPanel.createTextAreaPanel("Custom Paths:", ctx.txtPathPaths));
+        settingsPanel.add(ResultsPanel.createTextAreaPanel(ctx, "Custom Paths:", ctx.txtPathPaths));
 
         settingsPanel.setMinimumSize(new Dimension(600, 420));
         settingsPanel.setPreferredSize(new Dimension(600, 420));

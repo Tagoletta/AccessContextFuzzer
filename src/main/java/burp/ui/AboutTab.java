@@ -22,13 +22,23 @@ public class AboutTab {
         editor.setFont(new Font("SansSerif", Font.PLAIN, 13));
         editor.setOpaque(false);
 
-        // Open links in the system browser
+        // Open links in the system browser. Route through the extension's managed
+        // executor (so it is covered by the unload handler) and log any failure
+        // instead of silently discarding it.
         editor.addHyperlinkListener(e -> {
             if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED && e.getURL() != null) {
                 try {
                     java.net.URI uri = e.getURL().toURI();
-                    new Thread(() -> { try { Desktop.getDesktop().browse(uri); } catch (Exception ignored) {} }).start();
-                } catch (Exception ignored) {}
+                    ctx.taskExecutor.submit(() -> {
+                        try {
+                            Desktop.getDesktop().browse(uri);
+                        } catch (Exception ex) {
+                            ctx.api.logging().logToError("[ACF] Could not open link " + uri + ": " + ex.getMessage());
+                        }
+                    });
+                } catch (Exception ex) {
+                    ctx.api.logging().logToError("[ACF] Invalid link URL: " + ex.getMessage());
+                }
             }
         });
 
