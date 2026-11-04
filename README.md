@@ -67,6 +67,30 @@ Instead of manually crafting dozens of header and path variations, this extensio
 
 ---
 
+## 🌟 What's New in v2.5.0
+
+**Cache detection that works behind every CDN**
+- 🐛 **Critical: WCD detection only ever read the `X-Cache` header** — which Cloudflare (`cf-cache-status`), Vercel (`x-vercel-cache`) and the modern standard RFC 9211 (`Cache-Status`) do **not** send. Behind those CDNs the automatic MISS→HIT confirmation silently never fired, despite a selectable Cloudflare profile. A new, unit-tested `CacheAnalyzer` reads every known vendor cache header; `HttpUtils` and `ScanEngine` now delegate to it. `max-age`/`s-maxage` checks are also locale-safe now.
+
+**Fewer false positives — the Bypass Oracle**
+- 🎯 Before scanning, the engine probes a guaranteed-nonexistent sibling path. When a variant flips `401/403/404` → `2xx`, its body is compared to that catch-all probe: a match (or a server that answers `2xx` for everything) is flagged **`⚠️ LIKELY_FALSE_POSITIVE`** and dropped from the bypass tally and the *Interesting* filter, while a genuine, distinct bypass is tagged **`CONF:HIGH`**.
+- 📏 **Baseline calibration:** an extra baseline sample detects an unstable target (the BASELINE row shows `UNSTABLE_BASELINE` / `CATCH-ALL 2xx`), and on an unstable baseline the noisy `WORD_DELTA` / `LEN_DELTA` signals are suppressed.
+- 🧮 **Body-diff normalization:** JWTs, UUIDs, long hex digests, ISO timestamps and CSRF/nonce fields are masked before hashing, so an identical page with a rotating token no longer shows as `BODY_DIFF`.
+
+**Correctness & reliability**
+- 🐛 **UTF-8 encoding:** `urlEncode`/`iisUnicodeEncode` produced invalid output (`ğ` → `%11f`) for characters above U+00FF — they now encode UTF-8 bytes (`ğ` → `%C4%9F`) with uppercase, always-two-digit escapes (surrogate pairs handled).
+- 🐛 **Parallel mode back-off:** repeated `429/503` now cancels the queued requests and stops the scan (parallel mode cannot throttle per-request); WCD confirmation resends respect the configured delay.
+- 🐛 **HTTP/2 pseudo-headers** (`:authority`, `:path`) are only emitted for HTTP/2+ requests — on HTTP/1.1 they formed invalid header lines.
+- 🧹 **Variant dedup:** byte-identical duplicate requests are removed before scanning.
+
+**Workflow & reporting**
+- 📋 Results right-click **Copy as curl**; new **HTML Report** button (all rows, interesting/sensitive/false-positive styled); CSV export now carries a UTF-8 BOM so Excel renders Turkish characters.
+
+**Engineering**
+- ✅ **First unit-test suite** (JUnit 5, 26 tests over `CacheAnalyzer`, `EncoderUtils`, `HttpUtils`, bypass oracle); CI now runs the tests (`mvn package`, no more `-DskipTests`).
+
+---
+
 ## 🌟 What's New in v2.4.0
 
 **Web Cache Deception — detection that actually confirms**
@@ -585,7 +609,7 @@ mvn compile
 # Build JAR with dependencies
 mvn package
 
-# Output: target/access-context-fuzzer-2.4.0-jar-with-dependencies.jar
+# Output: target/access-context-fuzzer-2.5.0-jar-with-dependencies.jar
 ```
 
 ### Project Structure
