@@ -376,7 +376,7 @@ Every fuzzing result is displayed in an intelligent, color-coded table:
 | **#** | Row index |
 | **Variant** | Name of the test (e.g., `DELIM: '?'`, `WCD: '%23' + traversal`) |
 | **Status** | HTTP status code |
-| **Cache** | Cache status: `HIT ✅`, `MISS`, `PRIVATE 🚫`, `NO-STORE 🚫`, `HIT/Vary:Cookie`, or raw `X-Cache` value |
+| **Cache** | Vendor-agnostic cache status — `HIT ✅`, `MISS`, `PRIVATE 🚫`, `NO-STORE 🚫`, `HIT/Vary:Cookie`. Reads `X-Cache`, Cloudflare `cf-cache-status`, Vercel `x-vercel-cache`, Nginx `x-cache-status` and RFC 9211 `Cache-Status` |
 | **Words** | Word count of the response body |
 | **Lines** | Line count of the response body |
 | **Length** | Response body length in bytes |
@@ -390,6 +390,11 @@ Every fuzzing result is displayed in an intelligent, color-coded table:
 |-----|---------|
 | `SENSITIVE_DATA:JWT` | Response body contains a JWT token (also: `CSRF`, `EMAIL`, `BEARER`, `SECRET`) |
 | `🎯 POTENTIAL BYPASS` | Baseline was a 40x error, but payload returned 2xx — strong bypass signal |
+| `CONF:HIGH` | Bypass Oracle: the 2xx differs from the catch-all probe — high-confidence bypass |
+| `⚠️ LIKELY_FALSE_POSITIVE(catch-all)` | Bypass Oracle: the 2xx matches a known-nonexistent path (soft-404 / SPA). Excluded from the bypass tally and *Interesting* filter |
+| `🎯 WCD CONFIRMED (MISS→HIT)` | A cacheable `MISS` flipped to `HIT` on resend — confirmed cacheable (added to the WCD Findings tab) |
+| `🎯 CACHE_HIT_CACHEABLE` | Served from cache and publicly cacheable (no `private`/`no-store`/`Vary: Cookie`) |
+| `⚠️ UNSTABLE_BASELINE` / `⚠️ CATCH-ALL 2xx` | On the BASELINE row: the target varied across samples, or answers 2xx for unknown paths (bypass 2xx is a weak signal here) |
 | `🔀 REDIRECT BYPASS?` | 401/403 baseline changed to a 30x redirect — possible auth bypass via redirect |
 | `⚠️ BODY_BYPASS?` | Same 2xx status but body content changed — possible auth bypass with same code |
 | `🔍 PATH_CONFUSION` | 404 baseline returned a non-404 response — path traversal or confusion |
@@ -397,7 +402,7 @@ Every fuzzing result is displayed in an intelligent, color-coded table:
 | `STATUS_CHANGE` | Response status differs from baseline |
 | `WORD_DELTA` | Word count differs from baseline |
 | `LEN_DELTA` | Body length differs by >50 bytes |
-| `BODY_DIFF` | MD5 hash of the response body differs from baseline despite same status |
+| `BODY_DIFF` | Response body differs from baseline despite same status. Volatile tokens (JWT, UUID, CSRF/nonce, timestamps) are masked before hashing, so a rotating token alone no longer trips this |
 | `RATE_LIMITED(429)` | Target is rate limiting. Delay automatically increased. |
 | `⚠️ SESSION_DRIFT` | Original session is invalidated mid-scan |
 | `X-Cache:hit` | Response served from cache |
@@ -492,7 +497,9 @@ Each tab includes an **IP verification check** to ensure your traffic is properl
 | Feature | How |
 |---------|-----|
 | **Send to Repeater** | Extensively supports Multi-select (`Ctrl`+Click, `Shift`+Click). Right-click to find **"Send All Selected"** or **"Send All Interesting"**. |
-| **Export CSV** | Click *Export CSV* to save all tabular results |
+| **Copy as curl** | Right-click any row → **Copy as curl** to reproduce the request on the command line (HTTP/2 pseudo-headers and `Content-Length` stripped). |
+| **Export CSV** | Click *Export CSV* to save all tabular results (UTF-8 BOM, so Excel renders non-ASCII correctly). |
+| **HTML Report** | Click **📄 HTML Report** to export a self-contained report of all rows, with interesting / sensitive / false-positive rows highlighted. |
 | **Site Map** | All fuzzing requests are natively integrated and added to Burp's Site Map |
 
 ---
@@ -640,7 +647,10 @@ AccessContextFuzzer/
 │               │   └── DiffDialog.java
 │               └── util/
 │                   ├── HttpUtils.java               # Static helpers: status, cache, diff
+│                   ├── CacheAnalyzer.java           # Vendor-agnostic cache HIT/MISS analysis
 │                   └── EncoderUtils.java            # URL/Unicode encoding helpers
+│   └── test/
+│       └── java/burp/                               # JUnit 5 unit tests (CacheAnalyzer, EncoderUtils, HttpUtils, Oracle)
 ├── img/                                            # README screenshots
 ├── .github/
 │   └── workflows/
